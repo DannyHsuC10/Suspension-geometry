@@ -1,5 +1,19 @@
 # SuspensionGeometryLab 懸吊幾何工作台
 
+## GitHub Pages 網頁版
+
+[開啟 SuspensionGeometryLab](https://dannyhsuc10.github.io/Suspension-geometry/)。
+英文網頁版包含 Front FV、Rear FV、Side View、Wheel End 3D 與 Static Full Car，支援全車設定、24 點硬點模式、專案 JSON、LapSim CSV、資料與圖表匯出，以及 FV／SV／靜態全車的 STEP 匯出。Pacejka 輪胎模型僅在桌面版提供。網頁使用同一套幾何求解器，匯入的專案與圈速資料會在瀏覽器內處理。
+
+要在本機預覽網頁版，在儲存庫根目錄執行以下指令，然後開啟 `http://localhost:8000/`。瀏覽器首次啟動會下載 Pyodide 與 NumPy。
+
+```powershell
+python docs/build.py build/web
+python -m http.server 8000 --directory build/web
+```
+
+## 桌面版
+
 本工具是獨立的六頁 Tkinter 桌面介面。Canvas 圖表、平移縮放、捲動元件與 CSV 匯出均包含在本資料夾內，可單獨複製整個 `SuspensionGeometryLab` 資料夾使用。完整靜態構造直接呼叫套件內的 `static/fv/wireframe_geometry.py`，與套件內的 `static/fv/tk_wireframe.py` 使用相同來源。FV、SV 的運動零位均來自這份靜態結果；WE3D 與輪胎模型使用其中合併 FV / SV 的真實 3D 主銷。
 
 幾何程式已收進 `suspension_geometry_lab/static/`，輪端旋轉函式位於 `suspension_geometry_lab/wheel_end_geometry.py`；全部使用套件內 import，不依賴 `VehicleLab`、`vehicle_lab` 或 `new` 資料夾。圖表基底位於 `suspension_geometry_lab/chart_base.py`，捲動元件位於 `suspension_geometry_lab/widgets.py`。

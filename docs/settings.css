@@ -1,0 +1,100 @@
+.project-dialog {
+  --dialog-ink: #15223a;
+  --dialog-muted: #51647b;
+  --dialog-line: #d9e2ec;
+  --dialog-accent: #076d64;
+  width: min(900px, calc(100% - 32px));
+  max-height: min(88dvh, 920px);
+  padding: 0;
+  background: #fff;
+  color: var(--dialog-ink);
+  border: 1px solid var(--dialog-line);
+  border-radius: 12px;
+  box-shadow: 0 20px 65px #111d3140;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.project-dialog[open] { display: flex; flex-direction: column; }
+.project-dialog::backdrop { background: #111d3190; }
+
+.project-dialog-header, .project-dialog-footer {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 15px 20px;
+  flex: none;
+  background: #fff;
+}
+
+.project-dialog-header { justify-content: space-between; border-bottom: 1px solid var(--dialog-line); }
+.project-dialog-footer { justify-content: end; border-top: 1px solid var(--dialog-line); }
+.project-dialog-header h2 { margin: 0; font-size: 1.25rem; }
+.project-dialog-header p { margin: 4px 0 0; color: var(--dialog-muted); font-size: .86rem; }
+.project-dialog .project-close { font-size: 1.3rem; line-height: 1; padding: 8px 11px; }
+.project-dialog-body { overflow: auto; min-height: 0; padding: 18px 20px; }
+
+.project-general, .project-field-grid, .project-point-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.project-field { display: grid; min-width: 0; gap: 4px; align-content: start; }
+.project-field-label { font-size: .86rem; font-weight: 600; }
+.project-hint, .project-explanation { font-size: .78rem; color: var(--dialog-muted); line-height: 1.45; }
+.project-dialog .project-explanation { margin: 6px 0 10px; }
+.project-dialog .project-explanation:empty { display: none; }
+
+.project-dialog input, .project-dialog select, .project-dialog button {
+  box-sizing: border-box;
+  color: var(--dialog-ink);
+  background: #fff;
+  border: 1px solid var(--dialog-line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.project-dialog input, .project-dialog select { width: 100%; min-height: 35px; padding: 6px 8px; font-size: .88rem; }
+.project-dialog button { cursor: pointer; padding: 7px 11px; white-space: nowrap; font-size: .86rem; }
+.project-dialog button:hover { border-color: var(--dialog-accent); }
+.project-dialog .project-primary { color: #fff; border-color: var(--dialog-accent); background: var(--dialog-accent); }
+.project-dialog .project-primary:hover { background: #055951; }
+.project-dialog :is(input, select, button):focus-visible { outline: 2px solid #58b2b9; outline-offset: 2px; }
+.project-dialog :is(input, select):disabled { background: #eef2f7; color: var(--dialog-muted); }
+.project-dialog button:disabled { opacity: .65; cursor: wait; }
+.project-dialog input[aria-invalid="true"] { border-color: #b45309; background: #fff7ed; }
+
+.project-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0 12px;
+  padding: 6px;
+  background: #eef2f7;
+  border: 1px solid var(--dialog-line);
+  border-radius: 8px;
+}
+
+.project-tabs button { background: transparent; border-color: transparent; }
+.project-tabs [aria-selected="true"] { color: var(--dialog-accent); background: #fff; border-color: var(--dialog-line); font-weight: 600; }
+.project-section[hidden] { display: none; }
+.project-section h3 { font-size: .94rem; margin: 14px 0 7px; }
+.project-point-actions { margin: 0 0 10px; }
+.project-point-group { min-width: 0; border: 1px solid var(--dialog-line); border-radius: 8px; padding: 8px; }
+.project-section .project-point-group h3 { margin: 2px 0 6px; }
+.project-point-table, .project-derived-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.project-point-table th { text-align: start; }
+.project-point-table td { padding: 2px; }
+.project-point-table input { width: 100%; min-width: 0; min-height: 30px; padding: 4px; }
+.project-derived-table :is(th, td) { padding: 5px 7px; border-bottom: 1px solid var(--dialog-line); text-align: start; }
+.project-derived-table td { text-align: end; font-variant-numeric: tabular-nums; }
+.project-error { color: #9a3412; padding: 9px 20px; font-size: .86rem; background: #fff7ed; }
+.project-error[hidden] { display: none; }
+
+@media (max-width: 650px) {
+  .project-dialog { width: calc(100% - 20px); max-height: 94dvh; }
+  .project-dialog-body, .project-dialog-header, .project-dialog-footer { padding: 12px; }
+  .project-general, .project-field-grid, .project-point-grid { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .project-tabs button { padding: 5px 7px; }
+}

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Design and analyze suspension geometry across front, side and 3D views.">
+  <meta name="theme-color" content="#111d31">
+  <title>SuspensionGeometryLab</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./settings.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-copy">
+          <h1>SuspensionGeometryLab</h1>
+          <p id="project-name">Suspension geometry workbench</p>
+        </div>
+      </div>
+      <div class="project-actions">
+        <button class="button button-primary" id="open-settings" type="button" data-ready disabled>Vehicle settings</button>
+        <button class="button button-quiet" id="open-project" type="button" data-ready disabled>Import JSON</button>
+        <button class="button button-quiet" id="download-project" type="button" data-ready disabled>Download JSON</button>
+        <input id="project-file" type="file" accept=".json,application/json" hidden>
+        <input id="lap-file" type="file" accept=".csv,text/csv" hidden>
+      </div>
+    </div>
+  </header>
+  <main class="workspace">
+    <nav class="tabs" id="views" aria-label="Analysis views">
+      <button class="tab active" type="button" data-page="front" aria-current="page" data-ready disabled>Front FV</button>
+      <button class="tab" type="button" data-page="rear" data-ready disabled>Rear FV</button>
+      <button class="tab" type="button" data-page="sv" data-ready disabled>Side View (SV)</button>
+      <button class="tab" type="button" data-page="we" data-ready disabled>Wheel End (WE3D)</button>
+      <button class="tab" type="button" data-page="static" data-ready disabled>Static Full Car</button>
+    </nav>
+    <div class="workspace-grid">
+      <aside class="panel sidebar" aria-labelledby="inputs-heading">
+        <div class="panel-header">
+          <h2 class="section-heading" id="inputs-heading">Design inputs</h2>
+          <p id="geometry-mode"></p>
+        </div>
+        <form id="design-form" novalidate>
+          <div id="design-fields"></div>
+          <div id="design-action" class="sidebar-actions" hidden>
+            <button class="button button-primary" type="submit">Apply inputs</button>
+          </div>
+          <p class="form-error" id="design-error" role="alert" hidden></p>
+        </form>
+      </aside>
+      <div class="main-column">
+        <section class="panel chart-panel" aria-labelledby="view-heading">
+          <div class="panel-header chart-heading">
+            <div>
+              <h2 class="section-heading" id="view-heading">Front FV</h2>
+              <p id="view-note">Loading the suspension geometry solver…</p>
+            </div>
+          </div>
+          <div class="chart-toolbar">
+            <label class="field chart-select">Chart <select id="plot-select" data-ready disabled><option>Motion</option></select></label>
+            <label class="field" id="mode-field" hidden>Coordinates <select id="mode-select"></select></label>
+            <label class="field" id="axle-field" hidden>Axle <select id="axle-select"><option value="front">Front</option><option value="rear">Rear</option></select></label>
+            <button class="button button-quiet" id="reset-view" type="button" data-ready disabled>Reset view</button>
+          </div>
+          <div class="plot-controls" id="plot-controls" hidden>
+            <div class="pose-controls" id="pose-controls"></div>
+            <div class="view-options" id="view-options"></div>
+            <div class="view-options" id="lap-controls" hidden>
+              <button class="button button-quiet" id="import-lap" type="button">Import LapSim CSV</button>
+              <label class="check" id="lap-overlay-field" hidden><input id="lap-overlay" type="checkbox"> Show lap overlay</label>
+              <span id="lap-name"></span>
+              <button class="button button-quiet" id="clear-lap" type="button" hidden>Remove lap</button>
+            </div>
+            <div class="view-options" id="camber-controls" hidden></div>
+          </div>
+          <figure class="chart-figure">
+            <div class="chart-host" id="chart" tabindex="0" aria-label="Interactive geometry chart">
+              <p class="chart-empty">Loading the suspension geometry solver…</p>
+            </div>
+            <figcaption class="chart-caption">
+              <span id="chart-help">Scroll to zoom. Drag to pan.</span>
+              <span id="coverage"></span>
+            </figcaption>
+          </figure>
+          <div class="chart-legend" id="chart-legend" aria-label="Chart legend" hidden></div>
+          <div class="export-toolbar" aria-label="Export data and charts">
+            <label class="field">Export <select id="export-select" data-ready disabled></select></label>
+            <button class="button button-primary" id="export-button" type="button" data-ready disabled>Download</button>
+          </div>
+        </section>
+        <section class="panel metrics-panel" aria-labelledby="metrics-heading">
+          <div class="panel-header metrics-heading">
+            <h2 class="section-heading" id="metrics-heading">Current results</h2>
+            <span id="result-count"></span>
+          </div>
+          <div class="table-scroll">
+            <table class="metrics-table">
+              <thead><tr><th scope="col">Metric</th><th scope="col" id="result-value-header">Value</th></tr></thead>
+              <tbody id="metrics-body"><tr><td colspan="2">Waiting for solver</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+    <p class="status" id="status" role="status" aria-live="polite">Starting browser solver…</p>
+  </main>
+
+  <dialog class="app-dialog" id="step-dialog" aria-labelledby="step-title">
+    <form id="step-form">
+      <h2 id="step-title">Export STEP</h2>
+      <p>AP214 · millimetres · vehicle coordinates</p>
+      <label class="check"><input id="step-solids" name="export_solids" type="checkbox"> Export solid cylinders</label>
+      <label class="field" id="diameter-field" hidden>Suspension tube diameter (mm)
+        <input name="tube_diameter_mm" type="number" min="0.001" step="any" value="20" required disabled>
+      </label>
+      <label class="check"><input id="step-tires" name="include_tires" type="checkbox" checked> Include wheel geometry</label>
+      <label class="check"><input id="step-camber" name="include_static_camber" type="checkbox" checked> Apply static camber to wheels</label>
+      <label class="check"><input id="step-construction" name="show_construction" type="checkbox" checked> Include construction references in wireframe</label>
+      <div class="dialog-actions">
+        <button class="button button-quiet" id="cancel-step" type="button">Cancel</button>
+        <button class="button button-primary" type="submit">Download STEP</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="app-dialog" id="search-dialog" aria-labelledby="search-title">
+    <form id="search-form">
+      <h2 id="search-title">Optimization</h2>
+      <p id="search-note"></p>
+      <div id="search-fields" class="field-grid"></div>
+      <p id="search-result" role="status"></p>
+      <div class="dialog-actions">
+        <button class="button button-quiet" id="cancel-search" type="button">Cancel</button>
+        <button class="button button-primary" id="run-search" type="submit">Run search</button>
+      </div>
+    </form>
+  </dialog>
+  <noscript><p>Enable JavaScript to run SuspensionGeometryLab in your browser.</p></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
