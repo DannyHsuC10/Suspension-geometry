@@ -177,6 +177,8 @@ def english_error(message):
         return message
     if match := re.fullmatch(r"此姿態需要行程 (.+) mm，超出下垂 (.+) ～ 上壓 (.+) mm。", message):
         return f"This pose needs {match[1]} mm of travel, outside the range of −{match[2]} to {match[3]} mm."
+    if match := re.fullmatch(r"Roll (.+)° 超出此 Heave 的可達範圍 (.+) ～ (.+)°。", message):
+        return f"Roll of {match[1]}° is outside the reachable range of {match[2]}° to {match[3]}° at this heave."
     if match := re.fullmatch(r"要求的行程 (.+) mm 在目前幾何分支不可達。", message):
         return f"The requested travel of {match[1]} mm is unreachable on the current geometry branch."
     if match := re.fullmatch(r"steering\.(front|rear) · Rack 位移 (.+) mm 超出允許範圍 (.+) ～ (.+) mm。", message):

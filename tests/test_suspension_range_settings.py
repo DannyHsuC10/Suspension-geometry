@@ -103,6 +103,24 @@ class RangeSettingTests(unittest.TestCase):
                 with self.assertRaisesRegex(Unreachable, "超出"):
                     solver.pose(heave, solver.roll_bounds(heave)[1]+.01)
 
+    def test_saved_project_front_roll_inverts_travel_with_static_camber(self):
+        path = Path(__file__).resolve().parents[1] / "projects" / "suspension_geometry.json"
+        solver = Engine(load_project(path)).fv["front"]
+        self.assertNotEqual(solver.static_camber_deg, 0.)
+        for left, right in ((-30., 20.), (20., -30.), (-19., 13.), (0., 20.), (0., 0.), (20., 20.)):
+            with self.subTest(left=left, right=right):
+                expected = solver.solve(left, right)["metrics"]
+                heave, angle = expected["heave_mm"], expected["roll_deg"]
+                low, high = solver.roll_bounds(heave)
+                self.assertLessEqual(low, angle)
+                self.assertGreaterEqual(high, angle)
+                result = solver.pose(heave, angle)["metrics"]
+                self.assertAlmostEqual(result["roll_deg"], angle, places=7)
+                self.assertAlmostEqual(result["travel_left_mm"], left, places=5)
+                self.assertAlmostEqual(result["travel_right_mm"], right, places=5)
+        with self.assertRaisesRegex(Unreachable, "超出"):
+            solver.pose(-5., solver.roll_bounds(-5.)[1] + .01)
+
     def test_roll_surface_is_the_full_travel_domain_projected_into_heave_roll(self):
         project = default_project()
         project["analysis"].update(bump_mm=40, droop_mm=10, samples=5)

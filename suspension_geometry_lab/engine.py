@@ -170,7 +170,7 @@ class FVMotion:
         if self.static_camber == 0.:
             self.rc0 = z["RC"]
         self.cache = {}
-        self._roll_bounds_cache = {}
+        self._roll_limit_cache = {}
 
     def wheel_contact(self, center, wheel_angle):
         return center+self.loaded_radius*np.array([math.sin(wheel_angle), -math.cos(wheel_angle)])
@@ -240,12 +240,12 @@ class FVMotion:
         def cambers(l, r):
             g = r["contact"] - l["contact"]
             roll = math.atan2(g[1], g[0])
-            return math.degrees(l["wheel_angle"] - roll), -math.degrees(r["wheel_angle"] - roll), math.degrees(roll)
-        cl, cr, roll = cambers(left, right)
+            return math.degrees(l["wheel_angle"] - roll), -math.degrees(r["wheel_angle"] - roll)
+        cl, cr = cambers(left, right)
         frame = contact_frame(left["contact"], right["contact"])
         rc = None if left["IC"] is None or right["IC"] is None else intersection(left["contact"], left["IC"], right["contact"], right["IC"])
         metrics = {"travel_left_mm": float(left_mm), "travel_right_mm": float(right_mm),
-                   "heave_mm": (left_mm + right_mm)/2, "roll_deg": roll,
+                   "heave_mm": (left_mm + right_mm)/2, "roll_deg": frame["angle_deg"],
                    "camber_left_deg": cl, "camber_right_deg": cr,
                    "static_camber_deg": self.static_camber_deg,
                    **center_metrics("cg", self.zero["cg"], frame),
@@ -287,50 +287,74 @@ class FVMotion:
         return {"metrics": metrics, "lines": lines, "points": points,
                 "frame": frame, "annotations": annotations}
 
-    def roll_bounds(self, heave_mm):
-        """Roll attainable at this heave before either wheel reaches its stroke.
+    def _roll_at_delta(self, heave_mm, delta):
+        left = self.side(heave_mm-delta, True)
+        right = self.side(heave_mm+delta)
+        return contact_frame(left["contact"], right["contact"])["angle_deg"]
 
-        Mirror symmetry gives opposite angles at opposite differential travels.
-        If the linkage itself cannot reach the requested stroke, approach its
-        continuous reachable boundary from the equal-travel pose.
-        """
-        key = float(heave_mm)
-        if key not in self._roll_bounds_cache:
+    def _roll_limit(self, heave_mm):
+        """Return the reachable positive differential travel and its signed roll."""
+        if heave_mm not in self._roll_limit_cache:
             low, high = self.travel_bounds
             check_pose_travel((heave_mm, heave_mm), (low, high))
-            self.solve(heave_mm, heave_mm, gains=False)
+            self._roll_at_delta(heave_mm, 0.)
             delta = max(0., min(heave_mm-low, high-heave_mm))
-            def at_delta(value):
-                return abs(self.solve(heave_mm-value, heave_mm+value, gains=False)["metrics"]["roll_deg"])
             try:
-                angle = at_delta(delta)
+                angle = self._roll_at_delta(heave_mm, delta)
             except Unreachable:
+                # The linkage can reach its limit before the configured stroke.
                 reachable, unreachable = 0., delta
                 angle = 0.
                 for _ in range(30):
                     mid = (reachable+unreachable)/2
                     try:
-                        candidate = at_delta(mid)
+                        candidate = self._roll_at_delta(heave_mm, mid)
                     except Unreachable:
                         unreachable = mid
                     else:
                         reachable, angle = mid, candidate
-            self._roll_bounds_cache[key] = (-float(angle), float(angle))
-        return self._roll_bounds_cache[key]
+                delta = reachable
+            self._roll_limit_cache[heave_mm] = delta, angle
+        return self._roll_limit_cache[heave_mm]
+
+    def roll_bounds(self, heave_mm):
+        """Return the symmetric roll bounds for the reachable wheel stroke."""
+        _, angle = self._roll_limit(heave_mm)
+        return -abs(angle), abs(angle)
 
     def pose(self, heave_mm, roll_deg):
-        # Contact X moves during travel; iterate the actual track span.
-        dz = self.zero["gnd"][0] * 2 * math.tan(math.radians(roll_deg)) * 1000
-        for _ in range(20):
-            l, r = heave_mm - dz/2, heave_mm + dz/2
-            state = self.solve(l, r, gains=False)
-            if abs(state["metrics"]["roll_deg"]-roll_deg) < 1e-7:
-                if hasattr(self, "travel_bounds"):
-                    check_pose_travel((l, r), self.travel_bounds)
-                return self.solve(l, r)
-            span = state["points"]["R_gnd"][0] - state["points"]["L_gnd"][0]
-            dz = span * math.tan(math.radians(roll_deg))*1000
-        raise Unreachable("Heave / roll 反算未收斂。")
+        if roll_deg == 0.:
+            check_pose_travel((heave_mm, heave_mm), self.travel_bounds)
+            return self.solve(heave_mm, heave_mm)
+
+        max_delta, end_angle = self._roll_limit(heave_mm)
+        target, limit = abs(roll_deg), abs(end_angle)
+        tolerance = 1e-8
+        if target > limit+tolerance:
+            raise Unreachable(f"Roll {roll_deg:.6g}° 超出此 Heave 的可達範圍 {-limit:.6g} ～ {limit:.6g}°。")
+        direction = math.copysign(1., end_angle)
+        # Static camber makes the contact height difference deviate from the
+        # travel difference. Solve for the angle of the actual contact line.
+        if abs(target-limit) <= tolerance:
+            delta = max_delta
+        else:
+            lo, hi = 0., max_delta
+            lo_angle, hi_angle = 0., limit
+            for step in range(48):
+                # Interpolate for smooth poses and bisect every other step.
+                fraction = (target-lo_angle)/(hi_angle-lo_angle) if step % 2 == 0 else .5
+                delta = lo + fraction*(hi-lo)
+                angle = direction*self._roll_at_delta(heave_mm, delta)
+                if abs(angle-target) <= tolerance:
+                    break
+                if angle < target:
+                    lo, lo_angle = delta, angle
+                else:
+                    hi, hi_angle = delta, angle
+            else:
+                raise Unreachable("Heave / roll 反算未收斂。")
+        delta *= direction*math.copysign(1., roll_deg)
+        return self.solve(heave_mm-delta, heave_mm+delta)
 
 
 class SVMotion:
