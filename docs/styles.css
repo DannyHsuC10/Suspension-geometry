@@ -201,6 +201,7 @@ legend { margin-bottom: .45rem; font-size: .95rem; font-weight: 700; }
 .check input, .checkbox input { flex-shrink: 0; margin: 0; }
 .control-stack, .field-stack, .settings-sections { display: grid; gap: .7rem; }
 .sidebar form, #design-fields { display: grid; gap: .7rem; }
+.sidebar .field-grid { grid-template-columns: minmax(0, 1fr); }
 .sidebar .sidebar-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
 .design-field-hint {
   display: block;
