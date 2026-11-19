@@ -165,25 +165,6 @@ function fieldInput(group, metadata) {
   return wrapper;
 }
 
-function balanceNote() {
-  const note = document.createElement("div");
-  note.className = "design-hint";
-  const update = () => {
-    const inputs = Object.fromEntries(designInputs.filter(field => field.group === "vehicle")
-      .map(field => [field.key, field.input.valueAsNumber]));
-    const {wheelbase, cg_to_front, roll_stiffness_ratio} = inputs;
-    const front = (1 - cg_to_front / wheelbase) * 100;
-    note.textContent = front > 0 && front < 100 && roll_stiffness_ratio > 0 ?
-      "Rear RC optimization targets a 50/50 lateral load transfer split at zero travel. Static axle weight " +
-      front.toFixed(2) + "% front / " + (100 - front).toFixed(2) + "% rear. Roll stiffness ratio " +
-      number(roll_stiffness_ratio) + ". Fixed front RC " + number(project.front.rc_height) + " m." :
-      "Check the wheelbase, CG position and front / rear roll stiffness ratio.";
-  };
-  designInputs.filter(item => item.group === "vehicle").forEach(field => field.input.addEventListener("input", update));
-  update();
-  return note;
-}
-
 function renderInputs() {
   designInputs = [];
   $("design-error").hidden = true;
@@ -203,7 +184,7 @@ function renderInputs() {
     details.append(header, body);
     return details;
   });
-  $("design-fields").replaceChildren(...(page === "rear" ? [balanceNote()] : []), ...groups);
+  $("design-fields").replaceChildren(...groups);
   $("design-action").hidden = false;
 }
 
