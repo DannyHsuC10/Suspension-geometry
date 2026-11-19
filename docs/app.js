@@ -132,7 +132,11 @@ function fieldInput(group, metadata) {
   input.value = readOnly ? number(derived[group][key]) : project[group][key];
   input.readOnly = readOnly;
   input.required = !readOnly;
-  input.title = hint;
+  const description = document.createElement("small");
+  description.id = "design-hint-" + group + "-" + key;
+  description.className = "design-field-hint";
+  description.textContent = readOnly ? "Read-only value derived from hardpoints." : hint;
+  input.setAttribute("aria-describedby", description.id);
   if (!readOnly) {
     input.step = integer ? "1" : "any";
     if (minimum != null && !openMinimum) input.min = minimum;
@@ -140,7 +144,7 @@ function fieldInput(group, metadata) {
     designInputs.push({group, key, input});
   }
   view.append(fieldName, input);
-  wrapper.append(view);
+  wrapper.append(view, description);
   const search = ((page === "front" || page === "rear") && group === page) ?
     {rc_height: "roll-center", fvsa: "fvsa"}[key] :
     page === "sv" && key === "svsa" ? "svsa" :

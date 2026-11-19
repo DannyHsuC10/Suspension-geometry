@@ -11,6 +11,7 @@ DESKTOP_MODULES = (
     "chart_base.py",
     "charts.py",
     "gui.py",
+    "model_notes.py",
     "widgets.py",
     "*_dialog.py",
     "tk_*.py",

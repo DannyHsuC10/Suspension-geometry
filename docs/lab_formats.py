@@ -52,6 +52,7 @@ POINT_LABELS = {
     "LCA_F": "Lower arm front mount", "LCA_R": "Lower arm rear mount", "LBJ": "Lower ball joint",
 }
 EXTRA_HINTS = {
+    "wheelbase": "Greater than the CG-to-front distance.",
     "cg_to_front": "Less than the wheelbase.", "ground_clearance": "At or below the CG height.",
     "rim_inner_diameter": "Less than the unloaded tire diameter.",
     "rim_gap": "Twice the clearance must be less than the rim inner diameter.",
@@ -181,21 +182,29 @@ def finite_limit(value):
 
 def field_hint(group, key):
     limit = FIELD_LIMITS[group][key]
+    unit = unit_label(FIELDS[group][key][1])
+    suffix = f"\N{NO-BREAK SPACE}{unit}" if unit and unit not in ("fraction", "ratio") else ""
     if limit.min_abs:
-        hint = f"Magnitude must be at least {limit.min_abs:g}."
+        hint = f"Finite signed value with magnitude ≥ {limit.min_abs:g}{suffix}."
     elif not math.isfinite(limit.low):
-        hint = "Enter a finite number."
+        hint = "Any finite value."
     elif not math.isfinite(limit.high):
-        hint = f"Greater than {limit.low:g}." if limit.open_low else f"At least {limit.low:g}."
+        operator = ">" if limit.open_low else "≥"
+        hint = f"Finite value {operator} {limit.low:g}{suffix}."
     else:
         low = "(" if limit.open_low else "["
         high = ")" if limit.open_high else "]"
-        hint = f"{'Whole numbers' if limit.integer else 'Range'} {low}{limit.low:g}, {limit.high:g}{high}."
-    if key in INPUT_STEPS:
-        hint += f" Step {INPUT_STEPS[key]:g}."
-    if key in EXTRA_HINTS:
-        hint += " " + EXTRA_HINTS[key]
-    return hint
+        hint = f"{'Whole numbers' if limit.integer else 'Range'} {low}{limit.low:g}, {limit.high:g}{high}{suffix}."
+    if key == "anti":
+        step = INPUT_STEPS[key]
+        increment = f"Step\N{NO-BREAK SPACE}{step:g} ({step * 100:g} percentage points)."
+    elif key in INPUT_STEPS:
+        increment = f"Step\N{NO-BREAK SPACE}{INPUT_STEPS[key]:g}{suffix}."
+    elif limit.integer:
+        increment = "Step 1."
+    else:
+        increment = "Any increment."
+    return " ".join(part for part in (hint, increment, EXTRA_HINTS.get(key)) if part)
 
 
 def fields_metadata():

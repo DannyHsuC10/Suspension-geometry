@@ -5,7 +5,7 @@ from pathlib import Path
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, font, messagebox, simpledialog
 
 from .widgets import ScrollFrame
 from .project import (FIELDS, DERIVED_AXLE_FIELDS, MOUNT_X_FIELDS, mount_x_settings, travel_limits,
@@ -15,6 +15,7 @@ from .engine import Engine, Unreachable
 from .analysis import (RESULT_LABELS, LAP_CAMBER_PLOT, LAP_CAMBER_SERIES_BY_PAGE, PAGES, PLOTS, NOTES,
                        calculate_mapping, make_plot, static_point_rows)
 from .charts import LabChart
+from .model_notes import MODEL_NOTES
 from .lap_data import LAP_PAGES, calculate_lap_camber, calculate_lap_metrics, read_lap_data
 from .tire_page import TirePanel
 from .export import STEP_PAGES, point_rows, write_report, write_csv, write_step
@@ -475,6 +476,84 @@ class ParameterEditor(tk.Toplevel):
             messagebox.showerror("設定無法套用", str(exc), parent=self)
 
 
+class ModelNotes(ttk.Frame):
+    """Collapsible, selectable explanation with its own scrolling area."""
+
+    def __init__(self, master, chart, sections):
+        super().__init__(master)
+        self.chart = chart
+        self.resize_job = None
+        self.toggle = ttk.Button(self, text="▸ 展開模型說明", command=self.toggle_content)
+        self.toggle.pack(anchor="w")
+        self.body = ttk.Frame(self)
+        self.text = tk.Text(
+            self.body, font=("Microsoft JhengHei UI", 10), wrap="word", width=1, height=6,
+            background="#ffffff", foreground="#0f172a", padx=12, pady=8,
+            relief="flat", highlightthickness=1, highlightbackground="#cbd5e1",
+            highlightcolor="#0f766e", takefocus=True,
+        )
+        scrollbar = ttk.Scrollbar(self.body, orient="vertical", command=self.text.yview)
+        self.text.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.text.pack(side="left", fill="both", expand=True)
+        self.text.tag_configure("section", font=("Microsoft JhengHei UI", 10, "bold"), spacing1=7, spacing3=4)
+        self.text.tag_configure("paragraph", spacing3=6)
+        self.text.tag_configure("equation", foreground="#1e3a5f", lmargin1=16, lmargin2=16,
+                                spacing3=6, wrap="char")
+        for heading, paragraphs in sections:
+            self.text.insert("end", heading + "\n", "section")
+            for paragraph in paragraphs:
+                is_equation = paragraph.startswith("  ")
+                if is_equation:
+                    paragraph = "\n".join(line.removeprefix("  ") for line in paragraph.splitlines())
+                self.text.insert("end", paragraph + "\n", "equation" if is_equation else "paragraph")
+        self.text.configure(state="disabled")
+        self.text.bind("<Shift-Tab>", self.focus_toggle)
+        self.line_height = font.Font(root=self, font=self.text.cget("font")).metrics("linespace")
+        self.chart.bind("<Configure>", self.schedule_resize, add=True)
+        self.chart.bind("<Unmap>", self.schedule_resize, add=True)
+        self.master.bind("<Configure>", self.schedule_resize, add=True)
+
+    def focus_toggle(self, _event):
+        self.toggle.focus_set()
+        return "break"
+
+    def schedule_resize(self, _event):
+        if self.body.winfo_ismapped() and self.resize_job is None:
+            self.resize_job = self.after_idle(self.resize)
+
+    def resize(self):
+        self.resize_job = None
+        # Reclaim the space currently occupied by the reader when budgeting
+        # how much of the chart area the expanded notes should use.
+        height = self.chart.winfo_height() if self.chart.winfo_ismapped() else 0
+        if self.body.winfo_ismapped():
+            height += self.body.winfo_height() + 4
+        budget = min(height // 2, int(self.master.winfo_height() * .26))
+        lines = max(2, min(14, (budget - 22) // self.line_height))
+        if lines != int(self.text.cget("height")):
+            self.text.configure(height=lines)
+
+    def toggle_content(self):
+        if self.body.winfo_manager():
+            if self.resize_job is not None:
+                self.after_cancel(self.resize_job)
+                self.resize_job = None
+            if self.focus_get() == self.text:
+                self.toggle.focus_set()
+            self.body.pack_forget()
+            self.toggle.configure(text="▸ 展開模型說明")
+        else:
+            self.resize()
+            self.body.pack(fill="x", pady=(4, 0))
+            self.toggle.configure(text="▾ 收合模型說明")
+
+    def destroy(self):
+        if self.resize_job is not None:
+            self.after_cancel(self.resize_job)
+        super().destroy()
+
+
 class Panel(ttk.Frame):
     def __init__(self, app, key):
         super().__init__(app.notebook)
@@ -617,9 +696,11 @@ class Panel(ttk.Frame):
         scrollbar = ttk.Scrollbar(metric_frame, command=self.metrics.yview)
         self.metrics.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
+        self.model_notes = ModelNotes(right, self.chart, MODEL_NOTES[key])
+        self.model_notes.pack(side="bottom", fill="x", padx=8, pady=(0, 5))
         self.note = ttk.Label(right, text=NOTES[key], wraplength=950, foreground="#475569", padding=(8, 7))
         self.note.pack(side="bottom", fill="x")
-        right.bind("<Configure>", lambda event: self.note.configure(wraplength=max(300, event.width-24)))
+        right.bind("<Configure>", lambda event: self.note.configure(wraplength=max(300, event.width-24)), add=True)
         metric_frame.pack(side="bottom", fill="x", padx=8)
         self.chart.pack(fill="both", expand=True, padx=8, pady=6)
         self.ready = True
