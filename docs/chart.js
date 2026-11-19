@@ -214,8 +214,10 @@ export class LabChart {
     host.addEventListener("pointerleave", () => { this.help.textContent = this.instructions; });
     host.addEventListener("dblclick", () => this.reset());
     new ResizeObserver(() => {
-      if (this.spec && this.host.clientWidth !== this.observedWidth) this.schedule();
+      if (this.spec && (this.host.clientWidth !== this.observedWidth ||
+          this.host.clientHeight !== this.observedHeight)) this.schedule();
       this.observedWidth = this.host.clientWidth;
+      this.observedHeight = this.host.clientHeight;
     }).observe(host);
     host.addEventListener("wheel", event => {
       if (!this.spec || !(event.ctrlKey || event.metaKey)) return;

@@ -14,6 +14,7 @@
   --mint: #60e0c6;
   --error: #a1282d;
   --panel-shadow: 0 3px 12px #0d294409;
+  --status-space: 1.96875rem;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -133,7 +134,30 @@ textarea { resize: vertical; }
 .status[data-error], .status[data-tone=error], .status.error, .status-error, .error { color: var(--error); }
 .status[data-tone=success] { color: var(--accent); }
 #status:empty, .status:empty { display: none; }
-.workspace > .status { padding: .7rem .1rem 0; }
+.workspace > .status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.workspace > .status-error {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10;
+  width: auto;
+  max-width: min(32rem, calc(100vw - 2rem));
+  height: auto;
+  padding: .5rem .75rem;
+  clip-path: none;
+  white-space: normal;
+  background: var(--surface);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+}
 progress { max-width: 100%; }
 
 .chart-panel { overflow: hidden; }
@@ -170,7 +194,7 @@ progress { max-width: 100%; }
 .chart-host {
   position: relative;
   min-width: 0;
-  height: clamp(14rem, 38dvh, 27rem);
+  height: calc(clamp(14rem, 38dvh, 27rem) + var(--status-space));
   background: var(--night);
   color: #eaf1fb;
   overflow: hidden;
@@ -319,7 +343,7 @@ dialog h2 { font-size: 1.2rem; }
   .site-header { flex: none; }
   .workspace {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
     flex: 1;
     min-height: 0;
     padding-bottom: .7rem;
@@ -355,7 +379,7 @@ dialog h2 { font-size: 1.2rem; }
   .geometry-notes { grid-row: 4; }
   .tabs { gap: .25rem; }
   .tabs button, .tabs a { flex: 0 0 auto; }
-  .chart-host { height: clamp(14rem, 45dvh, 22rem); }
+  .chart-host { height: calc(clamp(14rem, 45dvh, 22rem) + var(--status-space)); }
   .panel-header { flex-wrap: wrap; }
 }
 
