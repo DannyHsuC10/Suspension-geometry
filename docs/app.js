@@ -109,7 +109,6 @@ function hardpointMode() {
 function syncProject(summary) {
   ({project, derived, lap} = summary);
   projectRevision++;
-  $("project-name").textContent = project.name;
 }
 
 async function onProject(candidate) {
