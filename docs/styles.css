@@ -114,7 +114,9 @@ textarea { resize: vertical; }
   background: var(--surface);
   box-shadow: var(--panel-shadow);
 }
-.panel.sidebar, .panel.metrics-panel, .panel.settings-preview { padding: .95rem; }
+.panel.sidebar, .panel.settings-preview { padding: .95rem; }
+.metrics-panel > .table-scroll { margin: 0 .95rem .95rem; }
+.metrics-heading #result-count { margin-left: .65rem; color: var(--muted); font-size: .8125rem; font-weight: 400; }
 .panel-header { display: flex; align-items: start; justify-content: space-between; gap: .65rem 1rem; }
 .sidebar .panel-header, .metrics-panel .panel-header, .settings-preview .panel-header { margin-bottom: .75rem; }
 .sidebar > .panel-header { flex-direction: column; gap: .18rem; margin-bottom: 0; }
@@ -157,16 +159,16 @@ progress { max-width: 100%; }
 .chart-host {
   position: relative;
   min-width: 0;
-  min-height: clamp(15rem, 42vw, 32rem);
+  height: clamp(14rem, 38dvh, 27rem);
   background: var(--night);
   color: #eaf1fb;
   overflow: hidden;
   touch-action: none;
 }
 .chart-host svg, .chart-host canvas { display: block; width: 100%; }
-.chart-host svg { height: auto; }
+.chart-host svg { height: 100%; }
 .chart-host:has(svg) { min-height: 0; }
-.chart-host canvas { height: clamp(15rem, 42vw, 32rem); touch-action: none; }
+.chart-host canvas { height: 100%; touch-action: none; }
 .chart-empty { display: grid; place-items: center; min-height: inherit; padding: 1.5rem; color: #b9cade; text-align: center; }
 .chart-caption, .chart-legend { color: #b9cade; background: var(--night-soft); font-size: .8125rem; line-height: 1.5; }
 .chart-caption { display: flex; justify-content: space-between; gap: .4rem; flex-wrap: wrap; padding: .55rem .95rem; }
@@ -227,15 +229,15 @@ thead { position: sticky; top: 0; z-index: 1; background: #ecf2f7; }
 .metrics-table th, .metrics-table td { white-space: nowrap; }
 .metrics-table tbody tr:hover { background: #f4f8fb; }
 
-.geometry-notes > summary {
+.geometry-notes > summary, .metrics-panel > summary {
   padding: .85rem .95rem;
   margin: 0;
   font-size: 1.07rem;
   line-height: 1.4;
 }
-.geometry-notes > summary::marker { color: var(--accent); }
-.geometry-notes > summary:focus-visible { outline-offset: -4px; }
-.geometry-notes[open] > summary { border-bottom: 1px solid var(--line); }
+.geometry-notes > summary::marker, .metrics-panel > summary::marker { color: var(--accent); }
+.geometry-notes > summary:focus-visible, .metrics-panel > summary:focus-visible { outline-offset: -4px; }
+.geometry-notes[open] > summary, .metrics-panel[open] > summary { border-bottom: 1px solid var(--line); }
 .notes-content {
   min-width: 0;
   padding: 1rem clamp(.85rem, 2.3vw, 1.6rem) 1.4rem;
@@ -339,7 +341,7 @@ dialog h2 { font-size: 1.2rem; }
   .geometry-notes { grid-row: 4; }
   .tabs { gap: .35rem; }
   .tabs button, .tabs a { flex: 0 0 auto; }
-  .chart-host, .chart-host canvas { min-height: 20rem; }
+  .chart-host { height: clamp(14rem, 45dvh, 22rem); }
   .panel-header { flex-wrap: wrap; }
 }
 

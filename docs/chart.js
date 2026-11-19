@@ -299,7 +299,7 @@ export class LabChart {
       return;
     }
     const W = this.width = Math.max(280, this.host.clientWidth || 1000);
-    const H = this.height = Math.round(Math.min(640, Math.max(295, W * .57)));
+    const H = this.height = Math.max(220, this.host.clientHeight || 300);
     const bounds = {left: W < 420 ? 55 : 67, right: W - (W < 480 ? 25 : 46),
       top: W < 560 && spec.current_status ? 62 : 48, bottom: H - 55};
     const hidden = new Set(spec.hidden_series ?? []);

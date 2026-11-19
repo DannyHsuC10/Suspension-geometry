@@ -1,4 +1,4 @@
-import {LabChart} from "./chart.js?v=tv-20261119";
+import {LabChart} from "./chart.js?v=compact-chart-20261119";
 import {setupGeometryNotes} from "./geometry-notes.js?v=tv-20261119";
 import {downloadFile, setupProjectSettings} from "./settings.js";
 

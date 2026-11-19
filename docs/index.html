@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#111d31">
   <title>SuspensionGeometryLab</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="./favicon.svg">
-  <link rel="stylesheet" href="./styles.css?v=header-icon">
+  <link rel="stylesheet" href="./styles.css?v=compact-chart-20261119">
   <link rel="stylesheet" href="./settings.css">
 </head>
 <body>
@@ -92,18 +92,18 @@
             <button class="button button-primary" id="export-button" type="button" data-ready disabled>Download</button>
           </div>
         </section>
-        <section class="panel metrics-panel" aria-labelledby="metrics-heading">
-          <div class="panel-header metrics-heading">
-            <h2 class="section-heading" id="metrics-heading">Current results</h2>
+        <details class="panel metrics-panel" aria-labelledby="metrics-heading">
+          <summary class="metrics-heading">
+            <span id="metrics-heading">Current results</span>
             <span id="result-count"></span>
-          </div>
+          </summary>
           <div class="table-scroll">
             <table class="metrics-table">
               <thead><tr><th scope="col">Metric</th><th scope="col" id="result-value-header">Value</th></tr></thead>
               <tbody id="metrics-body"><tr><td colspan="2">Waiting for solver</td></tr></tbody>
             </table>
           </div>
-        </section>
+        </details>
         <details class="panel geometry-notes" id="geometry-notes">
           <summary id="geometry-note-title">Geometry notes · Front FV</summary>
           <div class="notes-content" id="geometry-note-content"></div>
@@ -143,6 +143,6 @@
     </form>
   </dialog>
   <noscript><p>Enable JavaScript to run SuspensionGeometryLab in your browser.</p></noscript>
-  <script type="module" src="./app.js?v=tv-20261119"></script>
+  <script type="module" src="./app.js?v=compact-chart-20261119"></script>
 </body>
 </html>
