@@ -205,7 +205,9 @@ def lap_descriptor():
 
 def project_summary():
     return {**lab_formats.project_response(_engine), "lap": lap_descriptor(),
-            "steering": steering_settings(_engine.project)}
+            "steering": steering_settings(_engine.project),
+            "steeringGeometry": {axle: hardpoints.steering_geometry(_engine.project, axle)
+                                 for axle in ("front", "rear")}}
 
 
 def install_project(project):

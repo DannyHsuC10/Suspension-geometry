@@ -2,9 +2,9 @@ export const topView = String.raw`
   <h3>Top-view steering model</h3>
   <h4>Coordinates and upright pickups</h4>
   <p>Vehicle X points forward, Y left and Z up. The front axle is at X = 0 and the rear axle at X = −wheelbase. Dimensions are in metres; rack travel and stroke limits are in millimetres. The right upright pickup mirrors the left pickup about Y = 0.</p>
-  <p>The upright pickup height follows the line from the centered rack end to the same-side front-view instant center. Both parameter and hardpoint modes use the current FV geometry.</p>
+  <p>In direct hardpoint mode, an axle with <code>RACK</code> and <code>TOE</code> coordinates uses them as the neutral inboard and outboard tie rod ends. Otherwise the upright pickup height follows the line from the centered rack end to the same-side front-view instant center.</p>
   <p>\[Z_T=Z_R+(Y_T-Y_R)\frac{Z_{IC}-Z_R}{Y_{IC}-Y_R}\]</p>
-  <p>A finite instant center and nondegenerate projection are required. The zero-travel FV construction sets the pickup height. Full three-dimensional bump steer still requires verification over suspension travel.</p>
+  <p>The pickup height calculation requires a finite instant center and nondegenerate projection. Full three-dimensional bump steer still requires verification over suspension travel.</p>
   <h4>Rack motion and fixed-length tie rods</h4>
   <p>The rack is parallel to Y with neutral endpoints (X_R, ±length/2, Z_R). Both endpoints translate by the same signed displacement along Y. Each rod length is fixed from its centered, straight-ahead pose. Wheels rotate about their actual LBJ–UBJ kingpin axes using Rodrigues rotation. The solver retains the assembly branch continuously reachable from zero.</p>
   <p>\[\lVert T(\theta)-R(s)\rVert=\ell_T,\qquad T(\theta)=O+\operatorname{Rot}(\hat k,\theta)(T_0-O)\]</p>
@@ -20,5 +20,5 @@ export const topView = String.raw`
   <p>Chart curves use rack travel on the horizontal axis, include both stroke limits and zero, and retain gaps for unreachable positions. Current-pose markers follow the slider. Pose CSV and Sweep CSV record both wheels and their gains.</p>
   <p>LapSim imports use steer_FL_deg / steer_FR_deg for the front axle and steer_RL_deg / steer_RR_deg for the rear axle. Rack travel is estimated by fitting both measured angles to the nearest reachable model angle pair. Steering dots retain recorded angles; Ackermann dots use the recorded pair. Camber and gain dots interpolate static model values at the estimated rack position. Missing or unmatched samples are skipped. Body roll, pitch and suspension travel are outside this static TV overlay.</p>
   <h4>Project and STEP</h4>
-  <p>Apply TV inputs before downloading project JSON. The same settings round-trip between desktop and browser. Static Full Car displays four applied upright-to-rack tie rods at centered rack position. Its STEP export includes these links as polylines or solid cylinders using the selected tube diameter.</p>
+  <p>Apply TV inputs before downloading project JSON. The same settings round-trip between desktop and browser. Static Full Car exports neutral endpoint coordinates in Hardpoints CSV. Its STEP export includes the applied links as polylines or solid cylinders using the selected tube diameter.</p>
 `;

@@ -253,7 +253,8 @@ def write_report(path, project, page, state, mapping, svg, controls, *, derived_
                            "static_parameters": derived_parameters,
                            "mount_position_checks": mount_position_checks,
                            "contact_frame": (state or {}).get("frame")}, ensure_ascii=False, indent=2)
-    method = ("硬點模式：以 24 個 XYZ 定義幾何；FV 使用等效樞點，SV 使用硬點軸線的固定切線近似，WE 使用 UBJ–LBJ 主銷。"
+    method = ("硬點模式以 24 個 XYZ 定義 A 臂幾何。FV 使用等效樞點，SV 使用硬點軸線的固定切線近似，WE 使用 UBJ–LBJ 主銷。"
+              "如有指定 RACK、TOE，TV 使用其中的拉桿端點。"
               "快照內 front／rear 是保留的參數模式設計輸入，static_parameters 才是目前硬點反算值。"
               if project.get("hardpoints", {}).get("enabled") else "參數模式：由前後軸設計參數解算靜態幾何。")
     content = f'''<!doctype html><html lang="zh-Hant"><meta charset="utf-8">

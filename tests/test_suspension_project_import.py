@@ -76,6 +76,30 @@ class ProjectImportTests(unittest.TestCase):
         completed = fill_import_project(draft, fields, [""] * len(fields))
         self.assertEqual(Engine(completed).project["hardpoints"]["corners"], expected)
 
+    def test_import_repairs_declared_tie_rod_pair_only_on_its_axle(self):
+        source = default_project()
+        engine = Engine(source)
+        baseline = hardpoints.editor_points(engine, regenerate=True)
+        points = hardpoints.from_scene(engine.scene)
+        source["hardpoints"] = {"enabled": True, "corners": points}
+        _, fields = self.read(source)
+        self.assertEqual(fields, [])
+
+        x, y, z = baseline["FL"]["RACK"]
+        points["FL"]["RACK"] = [x + .005, y, z]
+        draft, fields = self.read(source)
+        expected = {("hardpoints", "corners", corner, name, index)
+                    for corner, name in (("FR", "RACK"), ("FL", "TOE"), ("FR", "TOE"))
+                    for index in range(3)}
+        self.assertEqual({field.path for field in fields}, expected)
+        completed = fill_import_project(draft, fields, [""] * len(fields))
+        repaired = Engine(completed).project["hardpoints"]["corners"]
+        self.assertEqual(repaired["FR"]["RACK"], [x + .005, -y, z])
+        self.assertEqual(repaired["FL"]["TOE"], baseline["FL"]["TOE"])
+        self.assertEqual(repaired["FR"]["TOE"], baseline["FR"]["TOE"])
+        self.assertEqual(repaired["RL"], points["RL"])
+        self.assertEqual(repaired["RR"], points["RR"])
+
     def test_repairs_defaults_using_each_supported_schema_and_keeps_optional_groups_optional(self):
         baseline = default_project()
         for version in range(1, 8):

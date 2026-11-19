@@ -1,6 +1,6 @@
 import {LabChart} from "./chart.js?v=compact-chart-20261119";
-import {setupGeometryNotes} from "./geometry-notes.js?v=tv-20261119";
-import {downloadFile, setupProjectSettings} from "./settings.js";
+import {setupGeometryNotes} from "./geometry-notes.js?v=tie-rod-hardpoints-20261119";
+import {downloadFile, setupProjectSettings} from "./settings.js?v=tie-rod-hardpoints-20261119";
 
 const $ = id => document.getElementById(id);
 const chart = new LabChart($("chart"), $("chart-legend"), $("chart-help"));
@@ -76,7 +76,7 @@ const state = () => states[page];
 let page = "front";
 let renderedPage;
 let project, views, fields, derived, metricLabels, camberPlot, hardpointNote, lap, lapFile;
-let steering;
+let steering, steeringGeometry;
 let showLap = true;
 let designInputs = [];
 let latest, requested = 0, completed = 0, running = false, scheduled = false;
@@ -109,7 +109,7 @@ function hardpointMode() {
 }
 
 function syncProject(summary) {
-  ({project, derived, lap, steering} = summary);
+  ({project, derived, lap, steering, steeringGeometry} = summary);
   if (steering) states.tv.values = [steering[states.tv.axle].rack_travel_mm, 0];
   projectRevision++;
 }
@@ -191,6 +191,7 @@ function renderInputs() {
 function renderTVInputs() {
   $("geometry-mode").textContent = "TV steering · " + state().axle + " axle";
   const settings = steering[state().axle];
+  const geometry = steeringGeometry[state().axle];
   const groups = [
     ["Upright tie rod pickup", [["tie_rod_x", "Left pickup X", "m"], ["tie_rod_y", "Left pickup Y", "m"]]],
     ["Centered rack", [["rack_x", "Rack X", "m"], ["rack_z", "Rack height Z", "m"], ["rack_length", "Rack length", "m"]]],
@@ -206,6 +207,7 @@ function renderTVInputs() {
     for (const [key, label, unit] of inputs) {
       const nonnegative = key.includes("limit");
       const positive = ["tie_rod_y", "rack_length"].includes(key);
+      const readOnly = Object.hasOwn(geometry, key);
       const wrapper = document.createElement("div");
       wrapper.className = "design-field";
       const view = document.createElement("label");
@@ -216,13 +218,17 @@ function renderTVInputs() {
       input.type = "number";
       input.step = "any";
       input.required = true;
-      input.value = settings[key];
+      input.value = readOnly ? geometry[key] : settings[key];
+      input.readOnly = readOnly;
       if (positive || nonnegative) input.min = "0";
-      input.addEventListener("input", () => input.setCustomValidity(positive && input.valueAsNumber <= 0 ? "Enter a positive value." : ""));
-      designInputs.push({key, input});
+      if (!readOnly) {
+        input.addEventListener("input", () => input.setCustomValidity(positive && input.valueAsNumber <= 0 ? "Enter a positive value." : ""));
+        designInputs.push({key, input});
+      }
       const hint = document.createElement("small");
       hint.className = "design-field-hint";
-      hint.textContent = positive ? "Finite value greater than 0." : nonnegative ? "Finite value of 0 or more." : "Finite vehicle coordinate.";
+      hint.textContent = readOnly ? "Edit in Vehicle settings → Hardpoints." :
+        positive ? "Finite value greater than 0." : nonnegative ? "Finite value of 0 or more." : "Finite vehicle coordinate.";
       view.append(name, input);
       wrapper.append(view, hint);
       body.append(wrapper);
@@ -237,7 +243,9 @@ function renderTVInputs() {
   }
   const hint = document.createElement("p");
   hint.className = "design-hint";
-  hint.textContent = "The right pickup mirrors Y. Upright Z follows the line between the rack end and the FV instant center. Apply inputs to update the model. Export tie rods through Static Full Car STEP.";
+  hint.textContent = Object.hasOwn(geometry, "tie_rod_x") ?
+    "This axle uses RACK and TOE from Vehicle settings → Hardpoints. Export the endpoints from Static Full Car → Hardpoints CSV." :
+    "The right pickup mirrors Y. Upright Z follows the line between the rack end and the FV instant center. Apply inputs to update the model. Export the endpoints from Static Full Car → Hardpoints CSV.";
   $("design-fields").replaceChildren(...groups, hint);
   $("design-action").hidden = false;
 }

@@ -57,6 +57,7 @@ STEERING_LABELS = {
 POINT_LABELS = {
     "UCA_F": "Upper arm front mount", "UCA_R": "Upper arm rear mount", "UBJ": "Upper ball joint",
     "LCA_F": "Lower arm front mount", "LCA_R": "Lower arm rear mount", "LBJ": "Lower ball joint",
+    "RACK": "Inboard tie rod end at centered rack", "TOE": "Outboard tie rod end on the upright",
 }
 EXTRA_HINTS = {
     "wheelbase": "Greater than the CG-to-front distance.",
@@ -141,6 +142,9 @@ DYNAMIC_SUFFIXES = {
     "目前參數無法產生有限車身接點。": "cannot produce a finite chassis mount with these parameters.",
     "需要三個有限 XYZ 座標（m）。": "requires three finite XYZ coordinates.",
     "需要上／下 A 臂各三點，共六個硬點。": "needs all six upper and lower arm hardpoints.",
+    "含有未知硬點名稱。": "contains an unknown hardpoint name.",
+    "同軸左右輪須同時提供 RACK 與 TOE 硬點。": "requires both RACK and TOE hardpoints on both sides of the axle.",
+    "RACK 與 TOE 不可重合。": "requires distinct RACK and TOE coordinates.",
     "硬點不可越過車身中心線。": "must stay on its side of the vehicle centerline.",
     "左右硬點必須以 Y=0 鏡射對稱。": "must match the opposite side reflected across Y = 0.",
     "前後車身接點重合，無法建立 A 臂旋轉軸。": "has coincident chassis mounts, which cannot define an arm rotation axis.",
@@ -286,9 +290,10 @@ def prepare_project(project):
     return {
         **project_response(engine), "fields": fields_metadata(), "mountFields": MOUNT_LABELS,
         "pointLabels": POINT_LABELS, "groups": GROUP_NAMES,
+        "optionalPoints": [key for key in POINT_LABELS if key not in hardpoints.POINTS],
         "derivedFields": {key: {"label": FIELD_LABELS[key], "unit": unit_label(unit)}
                           for key, (_, unit) in DERIVED_AXLE_FIELDS.items()},
-        "points": engine.project.get("hardpoints", {}).get("corners") or hardpoints.from_scene(engine.scene),
+        "points": hardpoints.editor_points(engine),
         "mounts": mount_x_settings(engine.project),
     }
 
@@ -420,7 +425,8 @@ def report_download(engine, payload, state, mapping):
     encoded_chart = base64.b64encode(svg.encode()).decode() if svg else ""
     chart = f'<img alt="Suspension geometry chart" src="data:image/svg+xml;base64,{encoded_chart}">' if svg else ""
     title = html.escape(PAGE_NAMES[page])
-    method = "Hardpoint geometry from 24 vehicle coordinates." if hardpoints.enabled(engine.project) else "Static geometry solved from front and rear axle design parameters."
+    method = ("A-arm geometry from 24 vehicle coordinates. Tie rods use any supplied RACK and TOE pairs."
+              if hardpoints.enabled(engine.project) else "Static geometry solved from front and rear axle design parameters.")
     content = f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SuspensionGeometryLab · {title}</title><style>
@@ -480,7 +486,8 @@ def handle(action, payload, *, engine=None, state=None, mapping=None):
             if "hardpoints" in project:
                 project["hardpoints"]["enabled"] = payload["mode"] == "hardpoint"
             candidate = Engine(project)
-            return {**project_response(candidate), "points": hardpoints.from_scene(candidate.scene)}
+            return {**project_response(candidate), "points": hardpoints.editor_points(
+                candidate, regenerate=payload["mode"] == "parameter")}
         if action == "project-import":
             return import_project(payload["text"])
         if action == "project-repair":

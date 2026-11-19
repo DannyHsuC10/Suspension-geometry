@@ -10,7 +10,8 @@ import numpy as np
 from suspension_geometry_lab import hardpoints
 from suspension_geometry_lab.analysis import calculate_mapping, make_plot, static_point_rows
 from suspension_geometry_lab.engine import Engine
-from suspension_geometry_lab.project import default_project, load_project, save_project, validate
+from suspension_geometry_lab.project import default_project, load_project, save_project, steering_settings, validate
+from suspension_geometry_lab.steering import solve_steering
 from suspension_geometry_lab.wheel_end_geometry import rotation_matrix
 
 TEST_TMP = Path(__file__).resolve().parents[1] / ".test-tmp"
@@ -33,12 +34,62 @@ class HardpointTests(unittest.TestCase):
         self.assertEqual(engine.scene.geometry["hardpoints"], data)
         self.assertEqual(len(make_plot("static", "iso", engine=engine)["markers"]), 24)
         rows = {row["name"]: row for row in static_point_rows(engine)}
-        self.assertEqual(len(rows), 24)
+        self.assertEqual(len(rows), 32)
         self.assertIn("FR_UCA_F", rows)
         self.assertEqual(rows["FR_UBJ"]["x_m"], data["FR"]["UBJ"][0])
         for left, right in (("FL", "FR"), ("RL", "RR")):
             for key in hardpoints.POINTS:
                 np.testing.assert_array_equal(np.array(data[left][key])*[1, -1, 1], data[right][key])
+        self.assert_exported_tie_rods(engine)
+
+    def assert_exported_tie_rods(self, engine):
+        rows = {row["name"]: row for row in static_point_rows(engine)}
+        for axle in ("front", "rear"):
+            pose = solve_steering(engine, axle, steering_settings(engine.project)[axle], travel_mm=0.)
+            for corner, wheel in pose["wheels"].items():
+                for key, point in (("RACK", pose["rack_ends"][corner]), ("TOE", wheel["tie_point"])):
+                    np.testing.assert_array_equal([rows[f"{corner}_{key}"][axis + "_m"] for axis in "xyz"], point)
+
+    def test_tie_rods_export_saved_or_explicit_geometry_by_mode(self):
+        project = hardpoint_project()
+        project["steering"] = steering_settings(project)
+        project["steering"]["front"].update(rack_x=-.14, rack_z=.172, rack_travel_mm=14.)
+        corners = hardpoints.editor_points(Engine(project))
+        hardpoints.set_point(corners, "FR", "RACK", [-.09, -.23, .16])
+        hardpoints.set_point(corners, "FR", "TOE", [-.08, -.52, .18])
+        # Keep the rear pair automatic to cover a project with one explicit axle.
+        for corner in ("RL", "RR"):
+            for key in hardpoints.TIE_ROD_POINTS:
+                del corners[corner][key]
+        project["hardpoints"]["corners"] = corners
+        engine = Engine(project)
+        self.assert_exported_tie_rods(engine)
+        self.assertEqual(hardpoints.editor_points(engine)["FL"]["TOE"], [-.08, .52, .18])
+        self.assertEqual(hardpoints.steering_geometry(project, "front")["rack_length"], .46)
+        pose = solve_steering(engine, "front", project["steering"]["front"])
+        np.testing.assert_allclose(pose["rack_ends"]["FR"], [-.09, -.216, .16])
+        wheel = pose["wheels"]["FR"]
+        self.assertAlmostEqual(np.linalg.norm(wheel["tie_point"] - pose["rack_ends"]["FR"]), wheel["tie_length"])
+        project["hardpoints"]["enabled"] = False
+        engine = Engine(project)
+        self.assert_exported_tie_rods(engine)
+        self.assertEqual(hardpoints.editor_points(engine)["FL"]["TOE"], [-.08, .52, .18])
+        self.assertEqual(hardpoints.editor_points(engine, regenerate=True)["FL"]["RACK"][0], -.14)
+
+    def test_tie_rod_overrides_validate_pairs_mirroring_and_length(self):
+        project = hardpoint_project()
+        corners = project["hardpoints"]["corners"]
+        hardpoints.set_point(corners, "FR", "RACK", [-.09, -.23, .16])
+        with self.assertRaisesRegex(ValueError, "RACK 與 TOE"):
+            validate(project)
+        hardpoints.set_point(corners, "FR", "TOE", corners["FR"]["RACK"])
+        with self.assertRaisesRegex(ValueError, "不可重合"):
+            validate(project)
+        hardpoints.set_point(corners, "FR", "TOE", [-.08, -.52, .18])
+        self.assertEqual(corners["FL"]["TOE"], [-.08, .52, .18])
+        corners["FL"]["TOE"][0] = -.1
+        with self.assertRaisesRegex(ValueError, "鏡射對稱"):
+            validate(project)
 
     def test_editing_either_side_mirrors_only_matching_point(self):
         data = hardpoint_project()["hardpoints"]["corners"]
@@ -110,6 +161,10 @@ class HardpointTests(unittest.TestCase):
         self.assertNotIn("RC", state["points"])
         plot = make_plot("front", "motion", state, engine=engine)
         self.assertFalse({"RC", "RC0"} & {p["name"] for p in plot["markers"]})
+        self.assertNotIn("RACK", hardpoints.editor_points(engine)["FL"])
+        for name, coordinates in (("RACK", [-.09, -.23, .16]), ("TOE", [-.08, -.52, .18])):
+            hardpoints.set_point(p["hardpoints"]["corners"], "FR", name, coordinates)
+        self.assert_exported_tie_rods(Engine(p))
 
     def test_project_roundtrip_mode_switch_and_old_schema_compatibility(self):
         old = default_project()

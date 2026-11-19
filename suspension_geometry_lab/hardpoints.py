@@ -1,7 +1,8 @@
-"""Six hardpoints per corner and their projected FV/SV analysis geometry.
+"""Suspension hardpoints and their projected FV/SV analysis geometry.
 
 Coordinates are vehicle X forward, Y left, Z up, in metres. The six points
 define the arms and kingpin; wheel centres still come from vehicle settings.
+Optional tie-rod endpoints define centered steering geometry.
 FV uses equivalent pivots at the ball-joint X planes. SV retains the existing
 fixed-tangent approximation, seeded by each actual arm hinge's velocity.
 Neither projection is a coupled spatial suspension/steering solver.
@@ -20,6 +21,8 @@ POINTS = {
     "UCA_F": "上 A 臂前車身接點", "UCA_R": "上 A 臂後車身接點", "UBJ": "上球接點",
     "LCA_F": "下 A 臂前車身接點", "LCA_R": "下 A 臂後車身接點", "LBJ": "下球接點",
 }
+TIE_ROD_POINTS = {"RACK": "拉桿內端（齒條側）", "TOE": "拉桿外端（羊角側）"}
+EDITOR_POINTS = {**POINTS, **TIE_ROD_POINTS}
 MIRROR = {"FL": "FR", "FR": "FL", "RL": "RR", "RR": "RL"}
 
 
@@ -45,9 +48,39 @@ def from_scene(scene):
     return result
 
 
+def editor_points(engine, *, regenerate=False):
+    """Return the saved draft with any available automatic points filled in."""
+    saved = None if regenerate else engine.project.get("hardpoints")
+    points = copy.deepcopy(saved["corners"]) if saved else from_scene(engine.scene)
+    for corner, (outer, inner) in engine.static_tie_rods(include_defaults=True):
+        points[corner].setdefault("RACK", inner.tolist())
+        points[corner].setdefault("TOE", outer.tolist())
+    return points
+
+
+def tie_rod_override(project, axle):
+    """Return the active explicit left pair for the axle, if supplied."""
+    if enabled(project):
+        left = project["hardpoints"]["corners"][axle[0].upper() + "L"]
+        if "RACK" in left and "TOE" in left:
+            return left
+    return None
+
+
+def steering_geometry(project, axle):
+    """Return TV geometry fields derived from the active tie-rod endpoints."""
+    pair = tie_rod_override(project, axle)
+    if pair is None:
+        return {}
+    rack_x, rack_y, rack_z = pair["RACK"]
+    tie_x, tie_y, _ = pair["TOE"]
+    return {"rack_x": rack_x, "rack_z": rack_z, "rack_length": 2 * rack_y,
+            "tie_rod_x": tie_x, "tie_rod_y": tie_y}
+
+
 def set_point(points, corner, name, coordinates):
     """Edit either side and mirror only its corresponding point immediately."""
-    if corner not in CORNERS or name not in POINTS:
+    if corner not in CORNERS or name not in EDITOR_POINTS:
         raise ValueError("未知的輪角或硬點名稱。")
     p = _coordinate(coordinates, f"{corner}/{name}")
     if p[1] * (1 if corner.endswith("L") else -1) <= 0:
@@ -67,16 +100,26 @@ def validate_points(points):
     if not isinstance(points, dict) or set(points) != set(CORNERS):
         raise ValueError("硬點必須包含 FL、FR、RL、RR 四個輪角。")
     for corner in CORNERS:
-        if not isinstance(points[corner], dict) or set(points[corner]) != set(POINTS):
+        data = points[corner]
+        if not isinstance(data, dict) or POINTS.keys() - data.keys():
             raise ValueError(f"{corner}：需要上／下 A 臂各三點，共六個硬點。")
+        if data.keys() - EDITOR_POINTS.keys():
+            raise ValueError(f"{corner}：含有未知硬點名稱。")
+        other = points[MIRROR[corner]]
+        if data.keys() & TIE_ROD_POINTS.keys() and (
+                not isinstance(other, dict) or TIE_ROD_POINTS.keys() - data.keys()
+                or TIE_ROD_POINTS.keys() - other.keys()):
+            raise ValueError(f"{corner}：同軸左右輪須同時提供 RACK 與 TOE 硬點。")
     for corner in CORNERS:
-        for name in POINTS:
-            p = _coordinate(points[corner][name], f"{corner}/{name}")
+        for name, coordinates in points[corner].items():
+            p = _coordinate(coordinates, f"{corner}/{name}")
             if p[1] * (1 if corner.endswith("L") else -1) <= 0:
                 raise ValueError(f"{corner}/{name}：硬點不可越過車身中心線。")
             other = _coordinate(points[MIRROR[corner]][name], f"{MIRROR[corner]}/{name}")
             if not np.allclose(p * [1, -1, 1], other, atol=1e-10, rtol=0):
                 raise ValueError(f"{corner}/{name}：左右硬點必須以 Y=0 鏡射對稱。")
+        if "RACK" in points[corner] and math.dist(points[corner]["RACK"], points[corner]["TOE"]) <= 1e-10:
+            raise ValueError(f"{corner}：RACK 與 TOE 不可重合。")
     return points
 
 

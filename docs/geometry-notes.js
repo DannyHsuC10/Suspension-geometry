@@ -2,9 +2,9 @@ const notes = {
   front: () => import("./geometry-fv.js").then(module => module.frontFV),
   rear: () => import("./geometry-fv.js").then(module => module.rearFV),
   sv: () => import("./geometry-sv-we.js").then(module => module.sideView),
-  tv: () => import("./geometry-tv.js").then(module => module.topView),
+  tv: () => import("./geometry-tv.js?v=tie-rod-hardpoints-20261119").then(module => module.topView),
   we: () => import("./geometry-sv-we.js").then(module => module.wheelEnd),
-  static: () => import("./geometry-static.js").then(module => module.staticVehicle),
+  static: () => import("./geometry-static.js?v=tie-rod-hardpoints-20261119").then(module => module.staticVehicle),
 };
 const katexBase = "https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/";
 let mathReady;

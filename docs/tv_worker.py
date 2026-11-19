@@ -4,6 +4,7 @@ import re
 
 import lab_formats
 
+from suspension_geometry_lab import hardpoints
 from suspension_geometry_lab.project import rack_travel_bounds, steering_settings
 from suspension_geometry_lab.steering import solve_steering
 from suspension_geometry_lab.steering_chart import steering_chart, steering_sweep_chart
@@ -29,7 +30,7 @@ ROWS = (
     ("steering_camber_gain_deg_per_deg", "Steering camber gain (deg/deg)", True),
     ("left_minus_right_deg", "Left minus right steering (deg)", False),
     ("ideal_outer_deg", "Ideal outer wheel steering (deg)", False),
-    ("tie_rod_z", "Solved upright tie rod Z (m)", False),
+    ("tie_rod_z", "Neutral left upright tie rod Z (m)", False),
     ("inner_corner", "Inner wheel", False), ("outer_corner", "Outer wheel", False),
 )
 TEXT = {
@@ -98,7 +99,7 @@ class TVAnalysis:
         error = None
         try:
             pose = solve_steering(self.engine, axle, settings, travel_mm=travel)
-            metrics = {"axle": axle, **settings, **pose["metrics"],
+            metrics = {"axle": axle, **settings, **hardpoints.steering_geometry(self.engine.project, axle), **pose["metrics"],
                        **steering_camber_metrics(self.engine, axle, pose)}
             state = {"metrics": metrics, "points": {}}
         except (ValueError, ArithmeticError) as exc:

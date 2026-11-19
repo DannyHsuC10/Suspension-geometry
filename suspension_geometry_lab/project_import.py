@@ -166,8 +166,15 @@ def _hardpoint_fields(project):
         yield MissingField(("hardpoints", "enabled"), "使用硬點模式", "", False)
     corners = _section(data, "corners", set(hardpoints.CORNERS), "hardpoints.corners")
     for corner in hardpoints.CORNERS:
-        points = _section(corners, corner, hardpoints.POINTS.keys(), f"硬點 {corner}")
-        for name in hardpoints.POINTS:
+        _section(corners, corner, hardpoints.EDITOR_POINTS.keys(), f"硬點 {corner}")
+
+    labels = {}
+    for corner in hardpoints.CORNERS:
+        points = corners[corner]
+        opposite = corners[hardpoints.MIRROR[corner]]
+        has_tie_rod = any(name in points or name in opposite for name in hardpoints.TIE_ROD_POINTS)
+        labels[corner] = hardpoints.EDITOR_POINTS if has_tie_rod else hardpoints.POINTS
+        for name in labels[corner]:
             values = points.get(name)
             if _blank(values):
                 values = []
@@ -178,7 +185,7 @@ def _hardpoint_fields(project):
     baseline = None
     for corner in hardpoints.CORNERS:
         opposite = hardpoints.MIRROR[corner]
-        for name, label in hardpoints.POINTS.items():
+        for name, label in labels[corner].items():
             for index, axis in enumerate("XYZ"):
                 if not _blank(corners[corner][name][index]):
                     continue
@@ -187,7 +194,7 @@ def _hardpoint_fields(project):
                     default = -mirrored if axis == "Y" else mirrored
                 else:
                     if baseline is None:
-                        baseline = hardpoints.from_scene(Engine(default_project()).scene)
+                        baseline = hardpoints.editor_points(Engine(default_project()), regenerate=True)
                     default = baseline[corner][name][index]
                 yield MissingField(("hardpoints", "corners", corner, name, index),
                                    f"{corner}/{name} {label} · {axis}", "mm", default, 1000)

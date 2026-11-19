@@ -218,8 +218,10 @@ class ParameterEditor(tk.Toplevel):
         ttk.Entry(name_row, textvariable=self.name).pack(side="left", fill="x", expand=True, padx=10)
         ttk.Label(name_row, text=f"1～{NAME_MAX_LENGTH} 字元").pack(side="right")
         self.hardpoint_mode = tk.BooleanVar(value=hardpoints.enabled(app.project))
-        self.point_data = copy.deepcopy(app.project["hardpoints"]["corners"]) if "hardpoints" in app.project else hardpoints.from_scene(app.engine.scene)
+        self.point_data = hardpoints.editor_points(app.engine)
         self.points_edited = "hardpoints" in app.project
+        saved_points = app.project.get("hardpoints", {}).get("corners", {})
+        self.saved_tie_axles = {corner[0] for corner, points in saved_points.items() if "RACK" in points}
         self.hardpoint_check = ttk.Checkbutton(
             self, text="使用直接修改硬點 XYZ（取消勾選：使用懸吊參數解算）", variable=self.hardpoint_mode,
             command=self.change_geometry_mode)
@@ -245,7 +247,7 @@ class ParameterEditor(tk.Toplevel):
                           wraplength=850, foreground="#475569").pack(fill="x", pady=8)
                 self.build_mount_x_fields(frame.content, group)
         self.hardpoint_tab = ttk.Frame(notebook, padding=10)
-        notebook.insert(1, self.hardpoint_tab, text="24 個懸吊硬點")
+        notebook.insert(1, self.hardpoint_tab, text="懸吊硬點")
         self.build_hardpoint_tab()
         ttk.Label(self, text="硬點模式保留原始 XYZ，參數由幾何反算；參數模式保留原設計輸入。兩模式皆由此視窗套用至全部頁面。", wraplength=980, padding=14).pack(fill="x")
         buttons = ttk.Frame(self, padding=14)
@@ -284,7 +286,8 @@ class ParameterEditor(tk.Toplevel):
     def build_hardpoint_tab(self):
         frame = self.hardpoint_tab
         ttk.Label(frame, text="X 向前、Y 向左、Z 向上；前軸 X=0、後軸 X=−軸距。表格單位 mm。\n"
-                  "每輪上／下 A 臂各三點。雙擊任一硬點編輯 XYZ，對側同名點立即鏡射（X、−Y、Z）。",
+                  "每輪包含上下 A 臂六點，以及拉桿內端 RACK、羊角側外端 TOE。"
+                  "雙擊硬點編輯 XYZ，對側同名點立即鏡射（X、−Y、Z）。",
                   padding=(0, 0, 0, 10)).pack(anchor="w")
         body = ttk.Frame(frame)
         body.pack(fill="both", expand=True)
@@ -313,16 +316,16 @@ class ParameterEditor(tk.Toplevel):
         self.derived_tree.pack(fill="y", expand=True)
         controls = ttk.Frame(frame, padding=(0, 10, 0, 0))
         controls.pack(fill="x")
-        ttk.Button(controls, text="由目前參數重新產生 24 點", command=self.regenerate_hardpoints).pack(side="left")
+        ttk.Button(controls, text="由目前參數重新產生硬點", command=self.regenerate_hardpoints).pack(side="left")
         self.derivation_message = tk.StringVar()
         ttk.Label(frame, textvariable=self.derivation_message, wraplength=980, foreground="#475569",
                   padding=(0, 10, 0, 0)).pack(fill="x")
         ttk.Label(frame, text="輪心與輪胎位置沿用車輛／輪距／負載半徑設定。FV 使用等效樞點；SV 使用硬點軸線的切線近似；"
-                  "WE3D 繞 UBJ–LBJ 主銷轉向。六點未包含轉向拉桿，不求解 bump steer 或行程與轉向的完整 3D 耦合。",
+                  "TV 上視圖使用 RACK、TOE 計算靜態轉向。空白的拉桿端點可在硬點模式下成對填寫。",
                   wraplength=980, foreground="#475569", padding=(0, 8, 0, 0)).pack(fill="x")
         self.populate_hardpoints()
 
-    def candidate(self, mode=None):
+    def candidate(self, mode=None, *, include_points=True):
         base = copy.deepcopy(self.app.project)
         base["arm_mount_x"] = {axle: {} for axle in ("front", "rear")}
         for (axle, key), var in self.mount_x_entries.items():
@@ -337,15 +340,22 @@ class ParameterEditor(tk.Toplevel):
             base["arm_mount_x"][axle][key] = value
         # These entries contain the retained design inputs, even in hardpoint mode.
         # Panel entries, in contrast, show derived values and are skipped there.
-        base["hardpoints"] = {"enabled": False, "corners": copy.deepcopy(self.point_data)}
+        if include_points:
+            corners = {corner: {key: value for key, value in points.items()
+                                if key in hardpoints.POINTS or corner[0] in self.saved_tie_axles}
+                       for corner, points in self.point_data.items()}
+            base["hardpoints"] = {"enabled": False, "corners": corners}
+        else:
+            base.pop("hardpoints", None)
         result = read_entries(base, self.entries)
-        result["hardpoints"]["enabled"] = self.hardpoint_mode.get() if mode is None else mode
+        if include_points:
+            result["hardpoints"]["enabled"] = self.hardpoint_mode.get() if mode is None else mode
         result["name"] = self.name.get().strip()
         return validate(result)
 
     def change_geometry_mode(self):
         if self.hardpoint_mode.get() and not self.points_edited:
-            if not self.regenerate_hardpoints():
+            if not self.regenerate_hardpoints(store_ties=False):
                 self.hardpoint_mode.set(False)
         for (group, key), entry in self.entry_widgets.items():
             if group in ("front", "rear") and key != "static_camber_deg":
@@ -363,15 +373,18 @@ class ParameterEditor(tk.Toplevel):
         tree.delete(*tree.get_children())
         for corner in hardpoints.CORNERS:
             tree.insert("", "end", iid=corner, text=corner, open=True)
-            for key, label in hardpoints.POINTS.items():
+            for key, label in hardpoints.EDITOR_POINTS.items():
                 tree.insert(corner, "end", iid=corner+"/"+key, text=key+" · "+label,
-                            values=[f"{value*1000:.4f}" for value in self.point_data[corner][key]])
+                            values=[f"{value*1000:.4f}" for value in self.point_data[corner].get(key, ())])
         if selection and tree.exists(selection[0]):
             tree.selection_set(selection)
+            tree.see(selection[0])
 
     def set_hardpoint(self, corner, name, coordinates):
         hardpoints.set_point(self.point_data, corner, name, coordinates)
         self.points_edited = True
+        if name in hardpoints.TIE_ROD_POINTS:
+            self.saved_tie_axles.add(corner[0])
         self.populate_hardpoints()
         self.refresh_derived()
 
@@ -380,7 +393,7 @@ class ParameterEditor(tk.Toplevel):
         if not self.hardpoint_mode.get() or "/" not in row:
             return
         corner, name = row.split("/")
-        point = self.point_data[corner][name]
+        point = self.point_data[corner].get(name, ())
         raw = simpledialog.askstring("編輯懸吊硬點", f"{corner}/{name}：X, Y, Z（mm）；對側會同步鏡射。\n不設數值上下界；請輸入三個有限座標。",
                                      initialvalue=", ".join(f"{x*1000:.12g}" for x in point), parent=self)
         if raw is None:
@@ -391,11 +404,13 @@ class ParameterEditor(tk.Toplevel):
         except ValueError as exc:
             messagebox.showerror("硬點座標錯誤", str(exc), parent=self)
 
-    def regenerate_hardpoints(self):
+    def regenerate_hardpoints(self, *, store_ties=True):
         try:
-            engine = Engine(self.candidate(False))
-            self.point_data = hardpoints.from_scene(engine.scene)
-            self.points_edited = False
+            engine = Engine(self.candidate(False, include_points=False))
+            self.point_data = hardpoints.editor_points(engine, regenerate=True)
+            self.points_edited = store_ties
+            if store_ties:
+                self.saved_tie_axles = {corner[0] for corner, points in self.point_data.items() if "RACK" in points}
             self.populate_hardpoints()
             self.refresh_derived()
             return True
@@ -409,7 +424,7 @@ class ParameterEditor(tk.Toplevel):
             self._preview_timer = None
         self.derived_tree.delete(*self.derived_tree.get_children())
         try:
-            parameter_engine = Engine(self.candidate(False))
+            parameter_engine = Engine(self.candidate(False, include_points=False))
             checks = parameter_engine.scene.geometry["mount_position_checks"]
             for (axle, key), label in self.mount_x_labels.items():
                 check = checks[axle][key]
@@ -422,10 +437,21 @@ class ParameterEditor(tk.Toplevel):
                         text += "\n"+check["message"]
                 label.configure(text=text, foreground="#b45309" if check["fallback"] else "#475569")
             if self._mount_positions_changed and not self.points_edited and not self.hardpoint_mode.get():
-                self.point_data = hardpoints.from_scene(parameter_engine.scene)
+                self.point_data = hardpoints.editor_points(parameter_engine, regenerate=True)
                 self.populate_hardpoints()
             self._mount_positions_changed = False
             engine = Engine(self.candidate(True))
+            preview = hardpoints.editor_points(engine if self.hardpoint_mode.get() else parameter_engine)
+            for corner, points in self.point_data.items():
+                if corner[0] in self.saved_tie_axles:
+                    continue
+                for key in hardpoints.TIE_ROD_POINTS:
+                    if key in preview[corner]:
+                        points[key] = preview[corner][key]
+                    else:
+                        points.pop(key, None)
+                    self.hardpoint_tree.item(corner+"/"+key,
+                                             values=[f"{value*1000:.4f}" for value in points.get(key, ())])
             for key, (label, unit) in DERIVED_AXLE_FIELDS.items():
                 values = [engine.derived_parameters[axle][key] for axle in ("front", "rear")]
                 self.derived_tree.insert("", "end", iid=key, text=f"{label} ({unit})",
@@ -662,7 +688,7 @@ class Panel(ttk.Frame):
             self.entry_widgets[(group, key)].configure(state="disabled" if derived else "normal")
             if hasattr(self.entry_widgets[(group, key)], "action_button"):
                 self.entry_widgets[(group, key)].action_button.state(["disabled"] if derived else ["!disabled"])
-        self.geometry_hint.configure(text="硬點模式：懸吊參數為反算唯讀值；靜態 Camber 可獨立編輯，24 個硬點由上方共用設定修改。" if direct else "參數模式：先以 Camber＝0 建立機構，再調整車輪的靜態 Camber 安裝角。")
+        self.geometry_hint.configure(text="硬點模式：懸吊參數為反算唯讀值；靜態 Camber 可獨立編輯，硬點由上方共用設定修改。" if direct else "參數模式：先以 Camber＝0 建立機構，再調整車輪的靜態 Camber 安裝角。")
         self.note.configure(text=NOTES[self.key] + (" 硬點模式：FV 使用等效樞點，SV 沿硬點軸線的固定切線近似；靜態 3D 與 WE 使用原始 XYZ。" if direct else ""))
         if self.key == "rear":
             self.update_balance_context()

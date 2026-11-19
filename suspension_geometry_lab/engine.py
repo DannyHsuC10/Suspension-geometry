@@ -11,7 +11,7 @@ from functools import cached_property
 
 import numpy as np
 
-from .project import static_objects, validate, travel_limits
+from .project import static_objects, steering_settings, validate, travel_limits
 from .static.fv.wireframe_geometry import build_wireframe_scene
 from .wheel_end_geometry import centered_steering_pickups, rotation_matrix
 from .wheel_alignment import installation_matrix, loaded_contact, rotate_wheel_points
@@ -417,7 +417,17 @@ class Engine:
                 float(t.direction_sign*(t.initial_ic[0]-t.contact_point[0])))
 
     def centered_steering_pickups(self, axle, settings):
-        """Use the authoritative zero-travel FV instant center for the axle."""
+        """Use explicit endpoints or derive the outer Z from the neutral FV geometry."""
+        override = hardpoints.tie_rod_override(self.project, axle)
+        if override is not None:
+            rack_x, _, rack_z = override["RACK"]
+            corners = self.project["hardpoints"]["corners"]
+            prefix = axle[0].upper()
+            return np.array([rack_x, 0., rack_z]), {
+                side: tuple(np.asarray(corners[prefix + side][name], dtype=float)
+                            for name in ("TOE", "RACK"))
+                for side in "LR"
+            }
         fv_ic = self.fv[axle].zero["IC"]
         try:
             return centered_steering_pickups(settings, fv_ic)
@@ -425,10 +435,20 @@ class Engine:
             label = "前軸" if axle == "front" else "後軸"
             raise Unreachable(f"{label} · {exc}") from exc
 
-    def static_tie_rods(self):
-        """Yield applied upright-to-rack links at centered rack position."""
-        for axle, settings in self.project.get("steering", {}).items():
-            _, pickups = self.centered_steering_pickups(axle, settings)
+    def static_tie_rods(self, *, include_defaults=False):
+        """Yield centered upright-to-rack links, with optional implicit steering defaults."""
+        applied = self.project.get("steering")
+        settings = steering_settings(self.project) if include_defaults else applied or {}
+        for axle in ("front", "rear"):
+            if axle not in settings and hardpoints.tie_rod_override(self.project, axle) is None:
+                continue
+            try:
+                _, pickups = self.centered_steering_pickups(axle, settings.get(axle))
+            except Unreachable:
+                if applied is not None:
+                    raise
+                # An old project can have no applied steering and no finite FV instant center.
+                continue
             for suffix, endpoints in pickups.items():
                 yield axle[0].upper() + suffix, endpoints
 

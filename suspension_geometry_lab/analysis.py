@@ -1,6 +1,7 @@
 """Stroke and pose sweeps with explicit invalid cells and cached side solves."""
 import numpy as np
 
+from .hardpoints import CORNERS, POINTS
 from .engine import Unreachable, line
 from .project import travel_limits
 
@@ -388,21 +389,23 @@ def static_point_rows(engine):
     def add(name, point):
         rows.append({"name": name, **{k+"_m": float(v) for k, v in zip("xyz", point)}})
     if "hardpoints" in engine.scene.geometry:
-        from .hardpoints import CORNERS, POINTS
         for corner in CORNERS:
             for key in POINTS:
                 add(corner+"_"+key, engine.scene.geometry["hardpoints"][corner][key])
-        return rows
-    for corner, data in engine.scene.geometry["kingpins"].items():
-        for key in ("ground", "UBJ", "LBJ", "axis_top"):
-            add(corner+"_"+key, data[key])
-    for corner, wheel in engine.scene.geometry["wheel_projection_geometry"].items():
-        add(corner+"_wheel_center", wheel["center"])
-        if wheel.get("static_camber_deg", 0.) != 0.:
-            add(corner+"_contact", wheel["contact"])
-            add(corner+"_construction_contact", wheel["construction_contact"])
-    for group in ("upper_arm_mount_geometry", "lower_arm_mount_geometry", "rear_upper_arm_mount_geometry", "rear_lower_arm_mount_geometry"):
-        for corner, geometry in engine.scene.geometry[group].items():
-            for key, point in geometry["mounts"].items():
-                add(corner+"_"+key, point)
+    else:
+        for corner, data in engine.scene.geometry["kingpins"].items():
+            for key in ("ground", "UBJ", "LBJ", "axis_top"):
+                add(corner+"_"+key, data[key])
+        for corner, wheel in engine.scene.geometry["wheel_projection_geometry"].items():
+            add(corner+"_wheel_center", wheel["center"])
+            if wheel.get("static_camber_deg", 0.) != 0.:
+                add(corner+"_contact", wheel["contact"])
+                add(corner+"_construction_contact", wheel["construction_contact"])
+        for group in ("upper_arm_mount_geometry", "lower_arm_mount_geometry", "rear_upper_arm_mount_geometry", "rear_lower_arm_mount_geometry"):
+            for corner, geometry in engine.scene.geometry[group].items():
+                for key, point in geometry["mounts"].items():
+                    add(corner+"_"+key, point)
+    for corner, (outer, inner) in engine.static_tie_rods(include_defaults=True):
+        add(corner+"_RACK", inner)
+        add(corner+"_TOE", outer)
     return rows

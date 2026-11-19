@@ -121,7 +121,10 @@ function buildSettings(view, metadata, base, request, commit) {
   const inputs = [];
   const mountInputs = [];
   const pointInputs = {};
-  let points = structuredClone(metadata.points);
+  const optionalPoints = new Set(metadata.optionalPoints);
+  const explicitTieAxles = new Set(['FL', 'RL'].filter(corner => base.hardpoints?.corners[corner]?.RACK)
+    .map(corner => corner[0]));
+  const points = structuredClone(metadata.points);
   let pointsEdited = Boolean(base.hardpoints);
   let activeSection = 'vehicle';
   let previewRevision = 0;
@@ -213,7 +216,10 @@ function buildSettings(view, metadata, base, request, commit) {
   const regenerate = button('Regenerate from design parameters');
   pointActions.append(regenerate);
   const hardpointSection = sections.hardpoints;
-  hardpointSection.append(element('p', 'project-explanation', 'Coordinates are in millimetres. X points forward, Y left and Z up. The front axle is at X = 0. Editing one side reflects the same point across Y = 0.'), pointActions);
+  hardpointSection.append(
+    element('p', 'project-explanation', 'Coordinates are in millimetres. X points forward, Y left and Z up. The front axle is at X = 0. Editing one side reflects the same point across Y = 0.'),
+    element('p', 'project-explanation', 'RACK is the centered inboard tie rod end. TOE is the outboard end on the upright. Edit the pair in direct hardpoint mode to use those coordinates for that axle.'),
+    pointActions);
   const pointGrid = element('div', 'project-point-grid');
   for (const corner of CORNERS) {
     pointInputs[corner] = {};
@@ -231,11 +237,12 @@ function buildSettings(view, metadata, base, request, commit) {
       row.append(heading);
       pointInputs[corner][key] = [];
       [...'XYZ'].forEach((axis, index) => {
-        const input = inputNumber(points[corner][key][index] * 1000, `${corner} ${label} ${axis} (mm)`);
+        const input = inputNumber(pointValue(corner, key, index), `${corner} ${label} ${axis} (mm)`);
         pointInputs[corner][key].push(input);
         row.insertCell().append(input);
         input.addEventListener('input', () => {
           pointsEdited = true;
+          if (optionalPoints.has(key)) explicitTieAxles.add(corner[0]);
           input.removeAttribute('aria-invalid');
           const text = input.value.trim();
           const opposite = pointInputs[MIRROR[corner]][key][index];
@@ -320,15 +327,22 @@ function buildSettings(view, metadata, base, request, commit) {
     }
   }
 
+  function pointValue(corner, key, index) {
+    return points[corner][key] ? points[corner][key][index] * 1000 : null;
+  }
+
   function readPoints() {
-    const result = structuredClone(points);
+    const result = {};
     for (const [corner, entries] of Object.entries(pointInputs)) {
+      result[corner] = {};
       for (const [key, coordinates] of Object.entries(entries)) {
-        for (const [index, input] of coordinates.entries()) {
-          const stored = points[corner][key][index];
+        if (optionalPoints.has(key) && (!explicitTieAxles.has(corner[0]) ||
+            coordinates.every(input => !input.value.trim()))) continue;
+        result[corner][key] = coordinates.map((input, index) => {
+          const stored = points[corner][key]?.[index];
           const label = `${corner} ${metadata.pointLabels[key]} ${'XYZ'[index]}`;
-          result[corner][key][index] = input.value === String(stored * 1000) ? stored : getNumber(input, label) / 1000;
-        }
+          return stored !== undefined && input.value === String(stored * 1000) ? stored : getNumber(input, label) / 1000;
+        });
       }
     }
     return result;
@@ -346,18 +360,23 @@ function buildSettings(view, metadata, base, request, commit) {
       const value = getNumber(input, label, true);
       project.arm_mount_x[axle][key] = input.value === original ? stored : value === null ? null : value / 1000;
     }
-    if (includePoints || direct || base.hardpoints || pointsEdited) {
-      project.hardpoints = { enabled: direct, corners: forceParameters ? points : readPoints() };
+    if (forceParameters) {
+      delete project.hardpoints;
+    } else if (includePoints || direct || base.hardpoints || pointsEdited) {
+      project.hardpoints = { enabled: direct, corners: readPoints() };
     }
     return project;
   }
 
-  function setPoints(next) {
-    points = structuredClone(next);
+  function setPoints(next, update = () => true) {
     for (const [corner, entries] of Object.entries(pointInputs)) {
       for (const [key, coordinates] of Object.entries(entries)) {
+        if (!update(corner, key)) continue;
+        if (next[corner][key]) points[corner][key] = next[corner][key];
+        else delete points[corner][key];
         for (const [index, input] of coordinates.entries()) {
-          input.value = String(points[corner][key][index] * 1000);
+          const value = pointValue(corner, key, index);
+          input.value = value === null ? '' : String(value);
           input.removeAttribute('aria-invalid');
         }
       }
@@ -389,6 +408,7 @@ function buildSettings(view, metadata, base, request, commit) {
         if (!dialog.open || revision !== previewRevision) return;
         setMountHints(result.mountChecks);
         if (activeMode === 'parameter' && !pointsEdited) setPoints(result.points);
+        else setPoints(result.points, (corner, key) => optionalPoints.has(key) && !explicitTieAxles.has(corner[0]));
         populateDerived(derived, metadata, result.derived);
         previewMessage.textContent = 'Geometry preview calculated.';
       } catch (failure) {
@@ -406,9 +426,15 @@ function buildSettings(view, metadata, base, request, commit) {
     apply.disabled = true;
     changeMode();
     try {
-      const result = await request('project-preview', { project: candidate(true, true), mode: 'parameter', base });
+      const result = await request('project-preview', { project: candidate(false, true), mode: 'parameter', base });
       if (!dialog.open) return;
       setPoints(result.points);
+      if (!switching) {
+        explicitTieAxles.clear();
+        for (const corner of ['FL', 'RL']) {
+          if (points[corner].RACK) explicitTieAxles.add(corner[0]);
+        }
+      }
       pointsEdited = true;
       displayError(error);
       populateDerived(derived, metadata, result.derived);

@@ -4,6 +4,7 @@ import math
 import tkinter as tk
 from tkinter import ttk
 
+from . import hardpoints
 from .charts import LabChart
 from .model_notes import MODEL_NOTES
 from .project import (RACK_LIMIT_FIELDS, STEERING_FIELDS, rack_travel_bounds, steering_settings,
@@ -47,6 +48,8 @@ class SteeringPanel(ttk.Frame):
         self.app = app
         self.axle = tk.StringVar(value="front")
         self.drafts = {axle: {key: tk.StringVar() for key in STEERING_FIELDS} for axle in AXLE_LABELS}
+        self.hardpoint_geometry = {}
+        self.geometry_display = {key: tk.StringVar() for key in GEOMETRY_FIELDS}
         self.rear_enabled = tk.BooleanVar(value=False)
         self.sliding_travel = tk.DoubleVar()
         self.notice = tk.StringVar()
@@ -95,9 +98,9 @@ class SteeringPanel(ttk.Frame):
             for key in keys:
                 self.add_entry(form, key)
             if "tie_rod_y" in keys:
-                self.setting_entry(form, "左側 Tie rod 求解 Z (m)", textvariable=self.tie_rod_z, state="readonly")
-                ttk.Label(form, text="由同側 Rack 端點與 A 臂前視瞬心求得。", foreground="#64748b",
-                          wraplength=280).pack(fill="x", pady=(0, 4))
+                self.setting_entry(form, "左側拉桿外端 Z (m)", textvariable=self.tie_rod_z, state="readonly")
+                self.tie_rod_hint = ttk.Label(form, foreground="#64748b", wraplength=280)
+                self.tie_rod_hint.pack(fill="x", pady=(0, 4))
 
         self.limit_frame = ttk.Frame(form)
         self.add_heading(self.limit_frame, "Rack 行程設定")
@@ -225,10 +228,17 @@ class SteeringPanel(ttk.Frame):
         self.change_axle()
 
     def change_axle(self):
+        self.hardpoint_geometry = hardpoints.steering_geometry(self.app.project, self.axle.get())
         for key, entry in self.entries.items():
-            entry.configure(textvariable=self.inputs[key])
-        for key, refresh in self.range_refresh.items():
-            refresh(self.inputs[key].get())
+            if key in self.hardpoint_geometry:
+                self.geometry_display[key].set(f"{self.hardpoint_geometry[key]:.12g}")
+                entry.configure(textvariable=self.geometry_display[key], state="readonly")
+            else:
+                entry.configure(textvariable=self.inputs[key], state="normal")
+        self.tie_rod_hint.configure(text="拉桿座標由「共用車輛／懸吊設定」的 RACK／TOE 硬點提供。"
+                                    if self.hardpoint_geometry else "由同側 Rack 端點與 A 臂前視瞬心求得。")
+        for refresh in self.range_refresh.values():
+            refresh()
         prefix = "F" if self.axle.get() == "front" else "R"
         self.metrics.heading("left", text=f"左輪 {prefix}L")
         self.metrics.heading("right", text=f"右輪 {prefix}R")
@@ -307,8 +317,9 @@ class SteeringPanel(ttk.Frame):
         settings = steering_settings(self.app.project)
         axle = self.axle.get()
         values = settings[axle]
-        for key in GEOMETRY_FIELDS:
-            values[key] = self.read_entry(key)
+        if not self.hardpoint_geometry:
+            for key in GEOMETRY_FIELDS:
+                values[key] = self.read_entry(key)
         if axle == "rear":
             values["enabled"] = self.rear_enabled.get()
         if self.travel_enabled:
@@ -341,13 +352,15 @@ class SteeringPanel(ttk.Frame):
         self.pose = pose
         settings[axle][TRAVEL] = metrics[TRAVEL]
         self.tie_rod_z.set(f"{metrics['tie_rod_z']:.6f}")
-        self.state = {"metrics": {"axle": axle, **settings[axle], **metrics}}
+        self.state = {"metrics": {"axle": axle, **settings[axle], **self.hardpoint_geometry, **metrics}}
         self.update_results(metrics)
         saved = steering_settings(self.app.project)
         if settings != saved:
             self.notice.set("正在預覽草稿。套用後可隨專案儲存。")
         elif "steering" in self.app.project:
             self.notice.set("已套用至目前專案。")
+        elif self.hardpoint_geometry:
+            self.notice.set("使用共用設定的 RACK／TOE 硬點。")
         else:
             self.notice.set("使用依目前車輛尺寸產生的初始值。")
         if pending_export is not None:

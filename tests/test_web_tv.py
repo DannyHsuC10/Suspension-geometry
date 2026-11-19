@@ -11,6 +11,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "docs"))
 import lab_worker as worker
+from suspension_geometry_lab import hardpoints
 from suspension_geometry_lab.project import default_project, steering_settings
 from suspension_geometry_lab.steering import solve_steering
 from suspension_geometry_lab.tv_analysis import steering_camber_metrics
@@ -54,6 +55,36 @@ class BrowserTVTests(unittest.TestCase):
         self.assertEqual((result["controls"][0]["min"], result["controls"][0]["max"]), (-12., 10.))
         step = self.call("export-data", page="static", plot="iso", values=[], kind="step", stepOptions={"include_tires": False})
         self.assertEqual(step["content"].count(" tie rod'"), 4)
+
+    def test_hardpoint_editor_and_static_csv_use_neutral_tie_rod_endpoints(self):
+        corners = hardpoints.from_scene(worker._engine.scene)
+        self.project["hardpoints"] = {"enabled": True, "corners": corners}
+        metadata = self.call("project-prepare", project=self.project)
+        self.assertEqual(set(metadata["optionalPoints"]), {"RACK", "TOE"})
+        self.assertNotIn("RACK", metadata["project"]["hardpoints"]["corners"]["FL"])
+        self.assertTrue(all({"RACK", "TOE"} <= points.keys() for points in metadata["points"].values()))
+        rack_x, _, rack_z = metadata["points"]["FL"]["RACK"]
+        toe_x, toe_y, toe_z = metadata["points"]["FL"]["TOE"]
+        hardpoints.set_point(corners, "FL", "RACK", [rack_x, .28, rack_z])
+        hardpoints.set_point(corners, "FL", "TOE", [toe_x, toe_y, toe_z + .012])
+
+        applied = self.call("project-apply", project=self.project)["project"]
+        summary = self.call("project", project=applied)
+        self.assertEqual(summary["steering"], self.project["steering"])
+        self.assertAlmostEqual(summary["steeringGeometry"]["front"]["rack_length"], .56)
+        self.assertEqual(summary["steeringGeometry"]["rear"], {})
+        tv = self.call("plot", page="tv", plot="top_view", axle="front", values=[3.])
+        self.assertIsNone(tv["error"])
+        self.assertAlmostEqual(tv["state"]["metrics"]["tie_rod_z"], toe_z + .012)
+        self.assertAlmostEqual(tv["state"]["metrics"]["rack_travel_mm"], 3.)
+
+        csv_text = self.call("export-data", page="static", plot="iso", values=[], kind="points")["content"]
+        rows = {row["name"]: row for row in csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))}
+        for corner in hardpoints.CORNERS:
+            for key in ("RACK", "TOE"):
+                row = rows[f"{corner}_{key}"]
+                self.assertEqual([float(row[f"{axis}_m"]) for axis in "xyz"],
+                                 corners[corner].get(key, metadata["points"][corner][key]))
 
     def test_lap_operating_points_and_csv_report(self):
         csv_text = (ROOT / "projects" / "lap_result.csv").read_text(encoding="utf-8-sig")
