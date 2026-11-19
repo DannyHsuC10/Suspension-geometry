@@ -1,12 +1,14 @@
 import copy
 import json
+import math
 from pathlib import Path
 import tempfile
 import unittest
 
 from suspension_geometry_lab import hardpoints
 from suspension_geometry_lab.engine import Engine
-from suspension_geometry_lab.project import default_project, load_project, save_project
+from suspension_geometry_lab.project import (RACK_LIMIT_LEFT, RACK_LIMIT_RIGHT, default_project, load_project,
+                                             save_project, steering_settings, validate)
 from suspension_geometry_lab.project_import import fill_import_project, read_import_project
 
 
@@ -83,9 +85,100 @@ class ProjectImportTests(unittest.TestCase):
                 self.assertEqual(completed["schema_version"], 7)
                 self.assertNotIn("hardpoints", completed)
                 self.assertNotIn("arm_mount_x", completed)
+                self.assertNotIn("steering", completed)
                 for axle in ("front", "rear"):
                     self.assertAlmostEqual(completed[axle]["anti"], baseline[axle]["anti"])
                     self.assertAlmostEqual(completed[axle]["svsa"], baseline[axle]["svsa"])
+
+    def test_steering_defaults_follow_vehicle_and_saved_axles_round_trip_independently(self):
+        source = default_project()
+        source["vehicle"].update(wheelbase=2.1, track_rear=1.5, free_radius=.26)
+        self.assertNotIn("steering", validate(source))
+        settings = steering_settings(source)
+        self.assertAlmostEqual(settings["rear"]["tie_rod_x"], -2.0)
+        self.assertAlmostEqual(settings["rear"]["tie_rod_y"], .615)
+        self.assertAlmostEqual(settings["rear"]["rack_length"], .66)
+        self.assertEqual(settings["rear"]["rack_z"], .26)
+        self.assertEqual(settings["front"]["rack_travel_mm"], 0)
+        self.assertFalse(settings["rear"]["enabled"])
+        self.assertEqual(settings["front"][RACK_LIMIT_LEFT], 30.)
+        self.assertEqual(settings["rear"][RACK_LIMIT_RIGHT], 30.)
+        source["steering"] = settings
+        settings["front"].update(rack_travel_mm=-18.5, rack_length=.62)
+        settings["front"][RACK_LIMIT_RIGHT] = 18.5
+        settings["rear"].update(enabled=True, rack_travel_mm=13.25)
+        settings["rear"][RACK_LIMIT_LEFT] = 14.
+        save_project(self.path, source)
+        self.assertEqual(load_project(self.path)["steering"], settings)
+        draft, fields = read_import_project(self.path)
+        self.assertEqual(fields, [])
+        self.assertEqual(draft["steering"], settings)
+        steering_settings(draft)["front"]["rack_length"] = .48
+        self.assertEqual(draft["steering"]["front"]["rack_length"], .62)
+
+    def test_repairs_present_steering_group_and_rejects_invalid_settings(self):
+        source = default_project()
+        source["vehicle"]["wheelbase"] = 2.1
+        source["steering"] = steering_settings(source)
+        source["steering"]["rear"].update(rack_x=None, rack_travel_mm=-10, enabled=None)
+        source["steering"]["front"][RACK_LIMIT_LEFT] = None
+        source["steering"]["front"]["tie_rod_z"] = None  # Superseded by the neutral FV solve.
+        draft, fields = self.read(source)
+        expected = {"steering.rear.rack_x", "steering.rear.enabled", "steering.front." + RACK_LIMIT_LEFT}
+        self.assertEqual({field.location for field in fields}, expected)
+        inputs = ["是" if field.path[-1] == "enabled" else "" for field in fields]
+        repaired = validate(fill_import_project(draft, fields, inputs))
+        self.assertNotIn("tie_rod_z", repaired["steering"]["front"])
+        self.assertAlmostEqual(repaired["steering"]["rear"]["rack_x"], -1.97)
+        self.assertEqual(repaired["steering"]["rear"]["rack_travel_mm"], -10)
+        self.assertEqual(repaired["steering"]["front"][RACK_LIMIT_LEFT], 30.)
+        for key, invalid in (("tie_rod_y", 0), ("rack_length", -.3), ("rack_z", float("nan")),
+                             ("rack_travel_mm", True), ("rack_travel_mm", 100.), (RACK_LIMIT_LEFT, math.inf),
+                             (RACK_LIMIT_RIGHT, -.01), ("unknown", 1)):
+            candidate = copy.deepcopy(repaired)
+            candidate["steering"]["front"][key] = invalid
+            with self.subTest(key=key, invalid=invalid), self.assertRaisesRegex(ValueError, r"steering\.front"):
+                validate(candidate)
+        repaired["steering"]["rear"]["enabled"] = 1
+        with self.assertRaisesRegex(ValueError, r"steering\.rear\.enabled"):
+            validate(repaired)
+
+    def test_legacy_tie_rod_height_is_ignored_when_imported_and_saved(self):
+        source = default_project()
+        expected = steering_settings(source)
+        source["steering"] = copy.deepcopy(expected)
+        source["steering"]["front"]["tie_rod_z"] = .19
+        source["steering"]["rear"]["tie_rod_z"] = ""
+        draft, fields = self.read(source)
+        self.assertEqual(fields, [])
+        self.assertEqual(load_project(self.path)["steering"], expected)
+        save_project(self.path, draft)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8-sig"))["steering"], expected)
+
+    def test_legacy_steering_defaults_preserve_front_stroke_and_disable_rear(self):
+        source = default_project()
+        source["steering"] = saved = steering_settings(source)
+        for settings in saved.values():
+            settings.pop(RACK_LIMIT_LEFT)
+            settings.pop(RACK_LIMIT_RIGHT)
+        saved["rear"].pop("enabled")
+        saved["front"]["rack_travel_mm"] = -38.25
+        saved["rear"]["rack_travel_mm"] = 12.
+        draft, fields = self.read(source)
+        self.assertEqual(fields, [])
+        loaded = load_project(self.path)["steering"]
+        self.assertEqual(loaded["front"]["rack_travel_mm"], -38.25)
+        self.assertEqual(loaded["front"][RACK_LIMIT_RIGHT], 38.25)
+        self.assertEqual(loaded["front"][RACK_LIMIT_LEFT], 30.)
+        self.assertFalse(loaded["rear"]["enabled"])
+        self.assertEqual(loaded["rear"]["rack_travel_mm"], 0.)
+        self.assertEqual(draft["steering"], saved)
+        loaded["rear"]["rack_travel_mm"] = 8.
+        loaded["rear"][RACK_LIMIT_LEFT] = 4.
+        saved_project = source | {"steering": loaded}
+        save_project(self.path, saved_project)
+        self.assertEqual(load_project(self.path)["steering"]["rear"]["rack_travel_mm"], 0.)
+        self.assertEqual(load_project(self.path)["steering"]["rear"][RACK_LIMIT_LEFT], 4.)
 
     def test_imports_sizing_sections_and_saves_a_separate_geometry_project(self):
         source = {

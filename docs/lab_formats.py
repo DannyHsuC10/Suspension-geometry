@@ -23,6 +23,7 @@ from suspension_geometry_lab.project_import import MissingField, fill_import_pro
 
 GROUP_NAMES = {"vehicle": "Vehicle and wheels", "front": "Front axle", "rear": "Rear axle", "analysis": "Sweep ranges"}
 PAGE_NAMES = {"front": "Front FV", "rear": "Rear FV", "sv": "Side View (SV)", "we": "Wheel End (WE3D)", "static": "Static Full Car"}
+PAGE_NAMES["tv"] = "Top View (TV)"
 FIELD_LABELS = {
     "wheelbase": "Wheelbase", "cg_to_front": "CG to front axle", "track_front": "Front track",
     "track_rear": "Rear track", "cg_height": "CG height", "mass": "Total mass", "gravity": "Gravity",
@@ -47,6 +48,12 @@ MOUNT_LABELS = {
     "upper_front_x": "Upper arm front mount X", "upper_rear_x": "Upper arm rear mount X",
     "lower_front_x": "Lower arm front mount X", "lower_rear_x": "Lower arm rear mount X",
 }
+STEERING_LABELS = {
+    "tie_rod_x": "Left upright tie rod X", "tie_rod_y": "Left upright tie rod Y",
+    "rack_x": "Rack X", "rack_z": "Rack height Z", "rack_length": "Rack length", "rack_travel_mm": "Rack travel",
+    "rack_limit_left_mm": "Left rack travel limit (+Y)", "rack_limit_right_mm": "Right rack travel limit (−Y)",
+    "enabled": "Enable rear steering",
+}
 POINT_LABELS = {
     "UCA_F": "Upper arm front mount", "UCA_R": "Upper arm rear mount", "UBJ": "Upper ball joint",
     "LCA_F": "Lower arm front mount", "LCA_R": "Lower arm rear mount", "LBJ": "Lower ball joint",
@@ -66,6 +73,7 @@ EXTRA_HINTS = {
 }
 UNIT_LABELS = {"0..1": "fraction", "1=100%": "fraction", "前/後": "ratio", "5..51": ""}
 REPORT_NOTES = {
+    "tv": "The rack translates along Y. Both fixed-length tie rods rotate the wheels about their 3D kingpins. Camber gains hold either steering or suspension height fixed, as indicated by their units.",
     "front": "The left-to-right x′ axis follows the current contact line, with the origin midway between the contact points. The upward y′ axis is perpendicular to the contact line. RC0 is the chassis-fixed zero-travel reference.",
     "rear": "The rear axle uses its own geometry. The diagram and roll center are shown in the current road frame. RC0 is the chassis-fixed zero-travel reference.",
     "sv": "Caster and mechanical trail use the current road frame. The unweighted anti ratio is positive toward the opposite axle. Brake- and drive-weighted values apply their respective axle force fractions.",
@@ -97,6 +105,12 @@ EXACT_ERRORS = {
     "網格點數必須為 5..51 的整數。": "Enter a whole number of samples per axis from 5 to 51.",
     "hardpoints 必須包含 enabled 布林值與 corners 硬點。": "hardpoints requires an enabled Boolean and all four corners.",
     "arm_mount_x 需要前後軸各四個 X 設定。": "Supply four arm mount X settings for each axle.",
+    "steering 需要前後軸各一組轉向設定。": "Supply steering settings for each axle.",
+    "steering.rear.enabled 必須是布林值。": "Set steering.rear.enabled to true or false.",
+    "前視 A 臂瞬心（IC）無法定義，無法求解拉桿接點 Z。": "A finite front-view A-arm instant center is required to solve the tie rod pickup height.",
+    "齒條端點與前視瞬心的 Y 座標重合，無法唯一求解拉桿接點 Z。": "The rack end and front-view instant center share the same Y coordinate, so the tie rod pickup height is undefined.",
+    "拉桿外接點與齒條端點的 Y 座標重合，無法建立前視投影線。": "Use distinct Y coordinates for the rack end and the outboard tie rod pickup to define its front-view projection.",
+    "前視共瞬心求得的拉桿接點 Z 無法表示為有限數值。": "The tie rod pickup height calculated from the front-view instant center is not finite.",
     "硬點必須包含 FL、FR、RL、RR 四個輪角。": "Hardpoints must include FL, FR, RL and RR.",
     "左側硬點 Y 必須大於 0；右側硬點 Y 必須小於 0。": "Use positive Y for left hardpoints and negative Y for right hardpoints.",
     "未知的輪角或硬點名稱。": "Unknown wheel corner or hardpoint name.",
@@ -122,6 +136,7 @@ DYNAMIC_SUFFIXES = {
     "須為大於 0 的有限數值（m）。": "must be finite and positive in metres.",
     "必須大於 0。": "must be greater than zero.",
     "欄位不完整或含未知欄位。": "has missing or unrecognized fields.",
+    "Rack 左右行程上限須為大於或等於 0 的有限數值（mm）。": "Enter finite, nonnegative rack travel limits in mm.",
     "XYZ 座標須為最多三格的 JSON 陣列。": "needs a JSON array with up to three coordinates.",
     "目前參數無法產生有限車身接點。": "cannot produce a finite chassis mount with these parameters.",
     "需要三個有限 XYZ 座標（m）。": "requires three finite XYZ coordinates.",
@@ -150,12 +165,18 @@ def english_error(message):
     message = str(message)
     if message in EXACT_ERRORS:
         return EXACT_ERRORS[message]
+    if match := re.fullmatch(r"(前軸|後軸) · (.+)", message):
+        if match[2] in EXACT_ERRORS:
+            axle = "Front axle" if match[1] == "前軸" else "Rear axle"
+            return f"{axle} · {EXACT_ERRORS[match[2]]}"
     if message.isascii():
         return message
     if match := re.fullmatch(r"此姿態需要行程 (.+) mm，超出下垂 (.+) ～ 上壓 (.+) mm。", message):
         return f"This pose needs {match[1]} mm of travel, outside the range of −{match[2]} to {match[3]} mm."
     if match := re.fullmatch(r"要求的行程 (.+) mm 在目前幾何分支不可達。", message):
         return f"The requested travel of {match[1]} mm is unreachable on the current geometry branch."
+    if match := re.fullmatch(r"steering\.(front|rear) · Rack 位移 (.+) mm 超出允許範圍 (.+) ～ (.+) mm。", message):
+        return f"The {match[1]} rack travel of {match[2]} mm is outside the range of {match[3]} to {match[4]} mm."
     if match := re.fullmatch(r"(.+)：瞬心與 (.+) 重合或無有限力線。", message):
         return f"{match[1]}: the force line through {match[2]} and the instant center is undefined."
     if match := re.fullmatch(r"(\w+) · (.+) 允許範圍：.+", message):
@@ -292,6 +313,8 @@ def retained_value_label(field):
         return f"{path[2]} · {POINT_LABELS[path[3]]} · {'XYZ'[path[4]]}"
     if path[0] == "arm_mount_x":
         return f"{GROUP_NAMES[path[1]]} · {MOUNT_LABELS[path[2]]}"
+    if path[0] == "steering":
+        return f"{GROUP_NAMES[path[1]]} · {STEERING_LABELS[path[2]]}"
     if path[0] == "svsa_design":
         return f"{GROUP_NAMES[path[1]]} · Set SVSA directly"
     label = FIELD_LABELS[path[-1]]

@@ -1,12 +1,13 @@
 /* global importScripts, loadPyodide */
 const runtime = "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
 const files = [
-  "lab_worker.py", "lab_formats.py",
+  "lab_worker.py", "lab_formats.py", "tv_worker.py",
   ...[
     "__init__.py", "analysis.py", "anti.py", "caster_search.py", "default_project.json",
     "engine.py", "export.py", "fvsa_search.py", "hardpoints.py", "input_limits.py", "lap_data.py",
     "project.py", "project_import.py", "roll_balance.py", "roll_center_search.py", "step_solids.py",
     "svsa_search.py", "wheel_alignment.py", "wheel_end_geometry.py",
+    "steering.py", "steering_chart.py", "tv_analysis.py", "tv_lap.py",
     "static/__init__.py", "static/analysis_settings.py", "static/car.py", "static/geometry.py",
     "static/Geometric_Analysis.py", "static/sv/__init__.py", "static/sv/side_view_geometry.py",
     ...[

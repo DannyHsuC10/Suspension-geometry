@@ -1,11 +1,12 @@
-import {LabChart} from "./chart.js";
-import {setupGeometryNotes} from "./geometry-notes.js";
+import {LabChart} from "./chart.js?v=tv-20261119";
+import {setupGeometryNotes} from "./geometry-notes.js?v=tv-20261119";
 import {downloadFile, setupProjectSettings} from "./settings.js";
 
 const $ = id => document.getElementById(id);
 const chart = new LabChart($("chart"), $("chart-legend"), $("chart-help"));
 const showGeometryNotes = setupGeometryNotes($("geometry-notes"), $("geometry-note-title"), $("geometry-note-content"));
 const titles = {front: "Front FV", rear: "Rear FV", sv: "Side View (SV)", we: "Wheel End (WE3D)", static: "Static Full Car"};
+titles.tv = "Top View (TV)";
 const formats = {state: "Pose CSV", points: "Hardpoints CSV", mapping: "Sweep CSV", svg: "SVG chart",
   png: "PNG chart", report: "HTML report / Print to PDF", step: "STEP (AP214)"};
 const specialMetrics = {
@@ -67,7 +68,7 @@ class Solver {
 const solver = new Solver();
 const request = solver.request.bind(solver);
 const states = Object.fromEntries(Object.keys(titles).map(page => [page, {
-  plot: page === "static" ? "iso" : "motion", mode: "travel", axle: "front", values: [0, 0],
+  plot: page === "static" ? "iso" : page === "tv" ? "top_view" : "motion", mode: "travel", axle: "front", values: [0, 0],
   construction: true, staticReferences: true, groups: {front: true, rear: true, sv: true},
   hiddenSeries: [], showNormalCurves: true,
 }]));
@@ -75,6 +76,7 @@ const state = () => states[page];
 let page = "front";
 let renderedPage;
 let project, views, fields, derived, metricLabels, camberPlot, hardpointNote, lap, lapFile;
+let steering;
 let showLap = true;
 let designInputs = [];
 let latest, requested = 0, completed = 0, running = false, scheduled = false;
@@ -107,7 +109,8 @@ function hardpointMode() {
 }
 
 function syncProject(summary) {
-  ({project, derived, lap} = summary);
+  ({project, derived, lap, steering} = summary);
+  if (steering) states.tv.values = [steering[states.tv.axle].rack_travel_mm, 0];
   projectRevision++;
 }
 
@@ -184,6 +187,7 @@ function balanceNote() {
 function renderInputs() {
   designInputs = [];
   $("design-error").hidden = true;
+  if (page === "tv") { renderTVInputs(); return; }
   $("geometry-mode").textContent = hardpointMode() ?
     "Hardpoint mode · Derived axle values are read-only." : "Parameter mode";
   const groups = views[page].fields.map(({group, label, keys}) => {
@@ -203,8 +207,77 @@ function renderInputs() {
   $("design-action").hidden = false;
 }
 
+function renderTVInputs() {
+  $("geometry-mode").textContent = "TV steering · " + state().axle + " axle";
+  const settings = steering[state().axle];
+  const groups = [
+    ["Upright tie rod pickup", [["tie_rod_x", "Left pickup X", "m"], ["tie_rod_y", "Left pickup Y", "m"]]],
+    ["Centered rack", [["rack_x", "Rack X", "m"], ["rack_z", "Rack height Z", "m"], ["rack_length", "Rack length", "m"]]],
+    ["Rack stroke limits", [["rack_limit_left_mm", "Left limit (+Y)", "mm"], ["rack_limit_right_mm", "Right limit (−Y)", "mm"]]],
+  ].map(([title, inputs]) => {
+    const details = document.createElement("details");
+    details.className = "design-group";
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = title;
+    const body = document.createElement("div");
+    body.className = "field-grid";
+    for (const [key, label, unit] of inputs) {
+      const nonnegative = key.includes("limit");
+      const positive = ["tie_rod_y", "rack_length"].includes(key);
+      const wrapper = document.createElement("div");
+      wrapper.className = "design-field";
+      const view = document.createElement("label");
+      view.className = "field";
+      const name = document.createElement("span");
+      name.textContent = `${label} (${unit})`;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "any";
+      input.required = true;
+      input.value = settings[key];
+      if (positive || nonnegative) input.min = "0";
+      input.addEventListener("input", () => input.setCustomValidity(positive && input.valueAsNumber <= 0 ? "Enter a positive value." : ""));
+      designInputs.push({key, input});
+      const hint = document.createElement("small");
+      hint.className = "design-field-hint";
+      hint.textContent = positive ? "Finite value greater than 0." : nonnegative ? "Finite value of 0 or more." : "Finite vehicle coordinate.";
+      view.append(name, input);
+      wrapper.append(view, hint);
+      body.append(wrapper);
+    }
+    details.append(summary, body);
+    return details;
+  });
+  if (state().axle === "rear") {
+    const enable = checkbox("Enable rear steering", settings.enabled, () => {});
+    enable.querySelector("input").id = "tv-rear-enabled";
+    groups.unshift(enable);
+  }
+  const hint = document.createElement("p");
+  hint.className = "design-hint";
+  hint.textContent = "The right pickup mirrors Y. Upright Z follows the line between the rack end and the FV instant center. Apply inputs to update the model. Export tie rods through Static Full Car STEP.";
+  $("design-fields").replaceChildren(...groups, hint);
+  $("design-action").hidden = false;
+}
+
 function readCandidate() {
   const candidate = structuredClone(project);
+  if (page === "tv") {
+    candidate.steering = structuredClone(steering);
+    const values = candidate.steering[state().axle];
+    for (const {key, input} of designInputs) {
+      if (!input.validity.valid || !Number.isFinite(input.valueAsNumber)) {
+        input.closest("details").open = true;
+        input.reportValidity();
+        throw new Error("Enter a valid " + key.replaceAll("_", " ") + ".");
+      }
+      values[key] = input.valueAsNumber;
+    }
+    if (state().axle === "rear") values.enabled = $("tv-rear-enabled").checked;
+    values.rack_travel_mm = state().axle === "rear" && !values.enabled ? 0 : state().values[0];
+    return candidate;
+  }
   for (const {group, key, input} of designInputs) {
     if (!input.validity.valid || !Number.isFinite(input.valueAsNumber)) {
       input.closest("details").open = true;
@@ -228,14 +301,14 @@ function renderViewOptions() {
   const cornering = v.plot === camberPlot.key;
   $("plot-select").replaceChildren(...plots.map(item => option(item.key, item.label)));
   $("plot-select").value = v.plot;
-  $("mode-field").hidden = page === "we" || page === "static";
+  $("mode-field").hidden = ["we", "static", "tv"].includes(page);
   $("mode-select").replaceChildren(option("travel", page === "sv" ? "Front / rear travel" : "Left / right travel"),
     option("pose", page === "sv" ? "Heave / Pitch" : "Heave / Roll"));
   $("mode-select").value = v.mode;
-  $("axle-field").hidden = page !== "we" || cornering;
+  $("axle-field").hidden = !["we", "tv"].includes(page) || cornering;
   $("axle-select").value = v.axle;
   $("lap-controls").hidden = !view.lap;
-  $("lap-overlay-field").hidden = !lap?.name || !view.lapOverlay || cornering || v.plot === "motion";
+  $("lap-overlay-field").hidden = !lap?.name || !view.lapOverlay || cornering || ["motion", "top_view"].includes(v.plot);
   $("lap-overlay").checked = showLap;
   $("lap-name").textContent = lap?.name ? lap.name + " · " + lap.total.toLocaleString("en") + " samples" : "";
   $("clear-lap").hidden = !lap?.name;
@@ -257,7 +330,7 @@ function renderViewOptions() {
       v.staticReferences = checked;
       scheduleUpdate();
     }),
-  ] : [checkbox("Construction references", v.construction, checked => {
+  ] : page === "tv" ? [] : [checkbox("Construction references", v.construction, checked => {
     v.construction = checked;
     scheduleUpdate();
   })];
@@ -272,7 +345,8 @@ function renderViewOptions() {
   $("view-options").replaceChildren(...display);
   const entries = [["state", formats.state], ["points", formats.points], ["mapping", cornering ? "Lap camber CSV" : formats.mapping],
     ["svg", formats.svg], ["png", formats.png], ["report", formats.report], ["step", formats.step]]
-    .filter(([key]) => page === "static" ? !["state", "mapping"].includes(key) : page !== "we" || key !== "step");
+    .filter(([key]) => page === "tv" ? !["points", "step"].includes(key) :
+      page === "static" ? !["state", "mapping"].includes(key) : page !== "we" || key !== "step");
   const lastFormat = $("export-select").value;
   $("export-select").replaceChildren(...entries.map(([key, label]) => option(key, label)));
   if (entries.some(([key]) => key === lastFormat)) $("export-select").value = lastFormat;
@@ -397,6 +471,30 @@ function renderResult(result, args, current) {
   if (camberStats && coverage?.straight != null) rows.unshift(metricRow("Straight-line samples excluded", coverage.straight.toLocaleString("en")));
   $("result-count").textContent = camberStats ? count : metrics.length ? metrics.length + " metrics" : "";
   $("metrics-body").replaceChildren(...(rows.length ? rows : [metricRow("Pose", error || "N/A")]));
+  const header = $("result-value-header").parentElement;
+  header.querySelectorAll(".tv-column").forEach(cell => cell.remove());
+  if (args.page === "tv") {
+    const prefix = args.axle === "front" ? "F" : "R";
+    $("result-value-header").textContent = "Left " + prefix + "L";
+    for (const label of ["Right " + prefix + "R", "Axle"]) {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      cell.className = "tv-column";
+      cell.textContent = label;
+      header.append(cell);
+    }
+    const data = result.state?.metrics ?? {};
+    $("metrics-body").replaceChildren(...(result.tvRows ?? []).map(({key, label, wheel}) => {
+      const row = metricRow(label, wheel ? number(data["left_" + key]) : "");
+      for (const value of [wheel ? number(data["right_" + key]) : "", wheel ? "" : number(data[key])]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      return row;
+    }));
+    $("view-note").textContent = views.tv.note + " " + (result.tvNote ?? "");
+  }
   if (current) showStatus(error || titles[args.page] + (count ? " · " + count : " · Ready"), Boolean(error));
 }
 
@@ -675,6 +773,11 @@ function bind() {
   });
   $("axle-select").addEventListener("change", event => {
     state().axle = event.target.value;
+    if (page === "tv") {
+      state().values = [steering[state().axle].rack_travel_mm, 0];
+      renderInputs();
+      clearResults();
+    }
     scheduleUpdate();
   });
   $("reset-view").addEventListener("click", () => chart.reset());

@@ -86,6 +86,7 @@ class Chart(ttk.Frame):
         # Construction intersections can be hundreds of metres away. Fit the
         # physical vehicle only, then clip construction lines to its viewport.
         pairs=[(x,y) for s in series+normal_curves for x,y in zip(s["x"],s["y"]) if self.finite(x) and self.finite(y)]
+        pairs.extend((x,y) for x,y in spec.get("fit_points",()) if self.finite(x) and self.finite(y))
         if not pairs:
             self.text(width/2,height/2,"沒有可繪製的數值（可能為飽和或幾何不可達）")
             return

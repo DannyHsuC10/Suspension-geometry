@@ -13,7 +13,7 @@ import numpy as np
 
 from .project import static_objects, validate, travel_limits
 from .static.fv.wireframe_geometry import build_wireframe_scene
-from .wheel_end_geometry import rotation_matrix
+from .wheel_end_geometry import centered_steering_pickups, rotation_matrix
 from .wheel_alignment import installation_matrix, loaded_contact, rotate_wheel_points
 from . import hardpoints
 from .anti import anti_percentages, axle_anti
@@ -397,6 +397,8 @@ class Engine:
             self.derived_parameters = {axle: copy.deepcopy(project[axle]) for axle in ("front", "rear")}
         self.fv = {axle: FVMotion(self.scene.geometry[axle], project[axle]["static_camber_deg"])
                    for axle in ("front", "rear")}
+        for axle, settings in project.get("steering", {}).items():
+            self.centered_steering_pickups(axle, settings)
         for axle in ("front", "rear"):
             self.derived_parameters[axle]["static_camber_deg"] = project[axle]["static_camber_deg"]
         for solver in self.fv.values():
@@ -413,6 +415,22 @@ class Engine:
             self.static_anti_metrics.update(anti_percentages(axle, values))
             self.derived_parameters[axle]["svsa"] = (None if t.initial_ic is None else
                 float(t.direction_sign*(t.initial_ic[0]-t.contact_point[0])))
+
+    def centered_steering_pickups(self, axle, settings):
+        """Use the authoritative zero-travel FV instant center for the axle."""
+        fv_ic = self.fv[axle].zero["IC"]
+        try:
+            return centered_steering_pickups(settings, fv_ic)
+        except ValueError as exc:
+            label = "前軸" if axle == "front" else "後軸"
+            raise Unreachable(f"{label} · {exc}") from exc
+
+    def static_tie_rods(self):
+        """Yield applied upright-to-rack links at centered rack position."""
+        for axle, settings in self.project.get("steering", {}).items():
+            _, pickups = self.centered_steering_pickups(axle, settings)
+            for suffix, endpoints in pickups.items():
+                yield axle[0].upper() + suffix, endpoints
 
     def pitch_angle_limit(self):
         """Reference pitch extent from reachable opposing travel endpoints.

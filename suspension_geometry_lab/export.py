@@ -49,6 +49,8 @@ def _step_polylines(engine, page, state, show_construction):
                 for name, endpoint in mounts.items():
                     yield f"{corner} {arm} arm {name}", (joints[joint], endpoint)
             yield f"{corner} upright", (joints["LBJ"], joints["UBJ"])
+        for corner, endpoints in engine.static_tie_rods():
+            yield f"{corner} tie rod", endpoints
         return
 
     if not state:

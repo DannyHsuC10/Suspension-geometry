@@ -9,7 +9,7 @@ import numpy as np
 from suspension_geometry_lab import hardpoints
 from suspension_geometry_lab.engine import Engine
 from suspension_geometry_lab.export import write_step
-from suspension_geometry_lab.project import default_project
+from suspension_geometry_lab.project import default_project, steering_settings
 
 
 class StepTests(unittest.TestCase):
@@ -82,6 +82,27 @@ class StepTests(unittest.TestCase):
                                        ("upright", "LBJ", "UBJ")):
                         np.testing.assert_allclose(curves[f"{corner} {name}"],
                                                    np.array([p[a], p[b]])*1000, atol=1e-8, rtol=0)
+
+    def test_static_tie_rods_use_neutral_rack_and_true_3d_pickups(self):
+        project = default_project()
+        project["steering"] = steering_settings(project)
+        project["steering"]["front"].update(tie_rod_x=-.16, tie_rod_y=.48,
+                                           rack_x=-.21, rack_z=.16, rack_length=.38, rack_travel_mm=12.)
+        project["steering"]["rear"].update(tie_rod_x=-1.47, tie_rod_y=.49,
+                                          rack_x=-1.42, rack_z=.205, rack_length=.44, enabled=False)
+        for direct in (False, True):
+            with self.subTest(hardpoint_mode=direct):
+                engine = Engine(project)
+                curves = dict(self.export_curves(engine, "static", show_construction=False))
+                self.assertEqual(len(curves), 24)
+                for axle, settings in engine.project["steering"].items():
+                    _, pickups = engine.centered_steering_pickups(axle, settings)
+                    for side, points in pickups.items():
+                        corner = axle[0].upper() + side
+                        np.testing.assert_allclose(curves[f"{corner} tie rod"],
+                                                   np.asarray(points) * 1000, atol=1e-8, rtol=0)
+                if not direct:
+                    project["hardpoints"] = {"enabled": True, "corners": hardpoints.from_scene(engine.scene)}
 
     def test_unsolved_pose_cannot_overwrite_file(self):
         with tempfile.TemporaryDirectory() as tmp:

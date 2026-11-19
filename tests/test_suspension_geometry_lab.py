@@ -533,6 +533,218 @@ class GuiTests(unittest.TestCase):
         self.assertIsNone(panel.error)
         self.app.update()
 
+    def test_tv_steering_previews_saves_and_exports_each_axle(self):
+        panel = self.app.steering_panel
+        self.app.notebook.select(panel)
+        self.app.geometry("1150x760")
+        self.app.update()
+        self.assertEqual(panel.pane.winfo_class(), "TPanedwindow")
+        left, right = map(str, panel.pane.panes())
+        self.assertEqual(panel.scroll.winfo_parent(), left)
+        self.assertTrue(panel.scroll.canvas.winfo_ismapped())
+        self.assertEqual(panel.apply_button.winfo_parent(), left)
+        self.assertTrue(panel.apply_button.winfo_ismapped())
+        self.assertEqual(panel.chart.winfo_parent(), right)
+        for key in ("tie_rod_x", "tie_rod_y", "rack_x", "rack_z", "rack_length",
+                    "rack_limit_left_mm", "rack_limit_right_mm"):
+            self.assertTrue(str(panel.entries[key]).startswith(f"{panel.scroll.content}."), key)
+        self.assertEqual(panel.travel_frame.winfo_parent(), right)
+        for widget in (panel.scale, panel.entries["rack_travel_mm"], panel.zero_button):
+            self.assertTrue(str(widget).startswith(f"{panel.travel_frame}."))
+            self.assertTrue(widget.winfo_ismapped())
+        self.assertLessEqual(panel.travel_frame.winfo_rooty() + panel.travel_frame.winfo_height(),
+                             panel.chart.winfo_rooty())
+        self.assertIn("TV", self.app.notebook.tab(panel, "text"))
+        self.assertTrue(self.app.export_buttons["state"].instate(["!disabled"]))
+        self.assertTrue(self.app.export_buttons["mapping"].instate(["!disabled"]))
+        self.assertTrue(panel.chart.spec["equal"])
+        self.assertIn("tie_rod_x", panel.entries)
+        self.assertIn("tie_rod_y", panel.entries)
+        self.assertNotIn("tie_rod_z", panel.entries)
+        self.assertAlmostEqual(float(panel.tie_rod_z.get()), panel.state["metrics"]["tie_rod_z"], places=6)
+        self.assertIsNone(panel.state["metrics"]["ackermann_pct"])
+
+        panel.chart.reset()
+        view = panel.chart.view.copy()
+        panel.scale.set(20.)
+        end = time.monotonic() + 5
+        while not panel.ready_for_export and time.monotonic() < end:
+            self.app.update()
+            time.sleep(.01)
+        self.assertTrue(panel.ready_for_export, panel.notice.get())
+        self.assertEqual(panel.state["metrics"]["rack_travel_mm"], 20.)
+        self.assertLess(panel.state["metrics"]["right_steer_deg"], panel.state["metrics"]["left_steer_deg"])
+        self.assertEqual(panel.metrics.item("ackermann_pct", "values")[3],
+                         f"{panel.state['metrics']['ackermann_pct']:.2f}")
+        self.assertEqual(panel.chart.view, view)
+        self.assertFalse(self.app.dirty)
+        old_engine = self.app.engine
+        panel.inputs["rack_z"].set(".181")
+        panel.apply()
+        self.assertIs(self.app.engine, old_engine)
+        self.assertTrue(self.app.dirty)
+
+        static_panel = self.app.panels["static"]
+        self.app.notebook.select(static_panel)
+        self.app.update()
+        self.wait(static_panel)
+        links = [path["points"] for path in static_panel.chart.spec["world_lines"] if path["name"] == "Tie rod"]
+        self.assertEqual(len(links), 4)
+        front = self.app.project["steering"]["front"]
+        self.assertNotIn("tie_rod_z", front)
+        _, front_pickups = self.app.engine.centered_steering_pickups("front", front)
+        self.assertIn([point.tolist() for point in front_pickups["L"]], links)
+        self.app.notebook.select(panel)
+        self.app.update()
+
+        panel.axle.set("rear")
+        panel.change_axle()
+        self.assertEqual(panel.state["metrics"]["rack_travel_mm"], 0.)
+        self.assertFalse(panel.rear_enabled.get())
+        self.assertTrue(str(panel.rear_check).startswith(f"{panel.scroll.content}."))
+        self.assertEqual(panel.travel_frame.winfo_manager(), "")
+        panel.rear_check.invoke()
+        self.assertTrue(panel.rear_enabled.get())
+        self.assertEqual(panel.travel_frame.winfo_manager(), "pack")
+        panel.inputs["rack_limit_right_mm"].set("12")
+        panel.inputs["rack_travel_mm"].set("-10")
+        panel.apply()
+        self.assertEqual(panel.state["metrics"]["axle"], "rear")
+        self.assertEqual(self.app.project["steering"]["front"]["rack_travel_mm"], 20.)
+        self.assertTrue(self.app.project["steering"]["rear"]["enabled"])
+        panel.inputs["rack_travel_mm"].set("1000")
+        panel.apply()
+        self.assertIsNone(panel.state)
+        self.assertFalse(panel.ready_for_export)
+        self.assertEqual(self.app.project["steering"]["rear"]["rack_travel_mm"], -10.)
+
+        with tempfile.TemporaryDirectory(dir=TEST_TMP) as tmp:
+            project_path = Path(tmp) / "steering.json"
+            with patch("suspension_geometry_lab.gui.filedialog.asksaveasfilename", return_value=str(project_path)):
+                self.assertTrue(self.app.save())
+            self.app.import_project(project_path)
+            self.assertEqual(panel.state["metrics"]["rack_travel_mm"], -10.)
+            self.assertTrue(panel.ready_for_export)
+            self.assertTrue(panel.rear_enabled.get())
+            self.assertEqual(panel.scale.cget("to"), -12.)
+            csv_path = Path(tmp) / "steering.csv"
+            with patch("suspension_geometry_lab.gui.filedialog.asksaveasfilename", return_value=str(csv_path)):
+                self.app.export("state")
+            with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+                row = next(csv.DictReader(handle))
+            self.assertEqual(row["axle"], "rear")
+            self.assertEqual(float(row["rack_travel_mm"]), -10.)
+            self.assertAlmostEqual(float(row["ackermann_pct"]), panel.state["metrics"]["ackermann_pct"])
+            self.assertAlmostEqual(float(row["left_camber_gain_deg_per_mm"]),
+                                   panel.state["metrics"]["left_camber_gain_deg_per_mm"])
+            _, rear_pickups = self.app.engine.centered_steering_pickups("rear", self.app.project["steering"]["rear"])
+            self.assertAlmostEqual(float(row["tie_rod_z"]), rear_pickups["L"][0][2])
+
+            panel.rear_check.invoke()
+            self.assertEqual(panel.travel_frame.winfo_manager(), "")
+            self.assertTrue(panel.scale.instate(["disabled"]))
+            self.assertEqual(panel.state["metrics"]["rack_travel_mm"], 0.)
+            self.assertEqual(panel.state["metrics"]["left_steer_deg"], 0.)
+            self.assertEqual(panel.state["metrics"]["right_steer_deg"], 0.)
+            panel.apply()
+            self.assertTrue(self.app.save())
+            self.app.import_project(project_path)
+            self.assertFalse(panel.rear_enabled.get())
+            self.assertEqual(panel.travel_frame.winfo_manager(), "")
+            self.assertEqual(self.app.project["steering"]["rear"]["rack_travel_mm"], 0.)
+            panel.rear_check.invoke()
+            self.assertEqual(panel.scale.cget("to"), -12.)
+            self.assertEqual(panel.state["metrics"]["rack_travel_mm"], 0.)
+
+    def test_tv_rack_slider_uses_separate_limits_and_rejects_typed_overtravel(self):
+        panel = self.app.steering_panel
+        self.app.notebook.select(panel)
+        self.app.update()
+        self.assertEqual(panel.rear_check.winfo_manager(), "")
+        self.assertEqual((panel.scale.cget("to"), panel.scale.cget("from")), (-30., 30.))
+        panel.inputs["rack_limit_left_mm"].set("22.125")
+        limit_entry = panel.entries["rack_limit_right_mm"]
+        panel.inputs["rack_limit_right_mm"].set("-1")
+        self.assertEqual(limit_entry.cget("style"), "Invalid.TEntry")
+        self.assertIn("請修正輸入", limit_entry.range_label.cget("text"))
+        panel.inputs["rack_limit_right_mm"].set("10.775")
+        self.assertEqual(limit_entry.cget("style"), "TEntry")
+        panel.request()
+        self.assertEqual((panel.scale.cget("to"), panel.scale.cget("from")), (-10.775, 22.125))
+        for overtravel, expected in ((100., 22.125), (-100., -10.775)):
+            panel.scale.set(overtravel)
+            panel.request()
+            self.assertAlmostEqual(panel.state["metrics"]["rack_travel_mm"], expected)
+
+        panel.inputs["rack_travel_mm"].set("-10.78")
+        panel.apply()
+        self.assertIn("超出允許範圍", panel.notice.get())
+        self.assertFalse(panel.ready_for_export)
+        self.assertFalse(self.app.dirty)
+        panel.inputs["rack_limit_left_mm"].set("0")
+        panel.inputs["rack_limit_right_mm"].set("0")
+        panel.zero_travel()
+        self.assertTrue(panel.scale.instate(["disabled"]))
+        self.assertEqual(panel.state["metrics"]["rack_travel_mm"], 0.)
+
+    def test_tv_switches_sweep_charts_overlays_imported_lap_and_exports_camber_gains(self):
+        panel = self.app.steering_panel
+        self.app.notebook.select(panel)
+        self.app.update()
+
+        def wait_for(condition):
+            deadline = time.monotonic() + 10
+            while not condition() and time.monotonic() < deadline:
+                self.app.update()
+                time.sleep(.01)
+            self.assertTrue(condition(), panel.plot_notice.get())
+
+        with tempfile.TemporaryDirectory(dir=TEST_TMP) as tmp:
+            sweep = Path(tmp) / "tv-sweep.csv"
+            with patch("suspension_geometry_lab.gui.filedialog.asksaveasfilename", return_value=str(sweep)):
+                self.app.export("mapping")
+            wait_for(sweep.is_file)
+            with sweep.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual((float(rows[0]["rack_travel_mm"]), float(rows[-1]["rack_travel_mm"])), (-30., 30.))
+            turned = next(row for row in rows if math.isclose(float(row["rack_travel_mm"]), 20.))
+            self.assertNotEqual(float(turned["left_camber_gain_deg_per_mm"]),
+                                float(turned["right_camber_gain_deg_per_mm"]))
+
+        self.app.import_lap(Path(__file__).resolve().parents[1] / "projects" / "lap_result.csv")
+        panel.plot_selector.current(1)
+        panel.plot_selector.event_generate("<<ComboboxSelected>>")
+        wait_for(lambda: bool((panel.chart.spec or {}).get("lap_points")))
+        self.assertEqual(panel.plot_key, "steer")
+        self.assertEqual([line["name"] for line in panel.chart.spec["series"]], ["左輪 FL", "右輪 FR"])
+        self.assertEqual(panel.chart.spec["lap_total"], len(self.app.lap_data.travels))
+        self.assertTrue(panel.lap_check.instate(["!disabled"]))
+        mapping = panel.mapping
+        panel.scale.set(20.)
+        panel.request()
+        self.assertIs(panel.mapping, mapping)
+        self.assertEqual(panel.chart.spec["markers"][0]["position"][0], 20.)
+        values = panel.metrics.item("camber_gain_deg_per_mm", "values")
+        self.assertNotEqual(values[1], values[2])
+
+        panel.plot_selector.current(2)
+        panel.plot_selector.event_generate("<<ComboboxSelected>>")
+        wait_for(lambda: bool(panel.chart.spec and panel.chart.spec["ylabel"] == "阿克曼率 [%]"))
+        self.assertTrue(panel.chart.spec["lap_points"])
+        for index, field in ((3, "camber_deg"), (4, "camber_gain_deg_per_mm"),
+                             (5, "steering_camber_gain_deg_per_deg")):
+            panel.plot_selector.current(index)
+            panel.plot_selector.event_generate("<<ComboboxSelected>>")
+            self.assertTrue(panel.chart.spec["lap_points"])
+            self.assertEqual(len(panel.chart.spec["series"]), 2)
+            self.assertEqual(panel.chart.spec["markers"][0]["position"],
+                             [20., panel.state["metrics"][f"left_{field}"]])
+        panel.lap_check.invoke()
+        self.assertNotIn("lap_points", panel.chart.spec)
+        panel.plot_selector.current(0)
+        panel.plot_selector.event_generate("<<ComboboxSelected>>")
+        self.assertTrue(panel.chart.spec["equal"])
+
     def test_pacejka_tab_updates_with_geometry_and_exports(self):
         panel = self.app.tire_panel
         panel.corner.set("FR")

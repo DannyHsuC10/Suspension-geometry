@@ -1,4 +1,4 @@
-"""Project schema. All editable design defaults live in default_project.json."""
+"""Project schema and defaults for optional model settings."""
 import copy
 import json
 import math
@@ -52,6 +52,18 @@ MOUNT_X_FIELDS = {
     "upper_front_x": "上 A 臂前面接點 X", "upper_rear_x": "上 A 臂後面接點 X",
     "lower_front_x": "下 A 臂前面接點 X", "lower_rear_x": "下 A 臂後面接點 X",
 }
+RACK_LIMIT_LEFT = "rack_limit_left_mm"
+RACK_LIMIT_RIGHT = "rack_limit_right_mm"
+RACK_LIMIT_FIELDS = (RACK_LIMIT_LEFT, RACK_LIMIT_RIGHT)
+DEFAULT_RACK_LIMIT_MM = 30.
+LEGACY_TIE_ROD_Z = "tie_rod_z"
+STEERING_FIELDS = {
+    "tie_rod_x": ("左側 Tie rod 接點 X", "m"), "tie_rod_y": ("左側 Tie rod 接點 Y", "m"),
+    "rack_x": ("Rack X", "m"),
+    "rack_z": ("Rack 高度 Z", "m"), "rack_length": ("Rack 長度", "m"),
+    RACK_LIMIT_LEFT: ("左行程上限 (+Y)", "mm"), RACK_LIMIT_RIGHT: ("右行程上限 (−Y)", "mm"),
+    "rack_travel_mm": ("Rack 左右位移", "mm"),
+}
 
 
 def parameter_fields(version):
@@ -81,6 +93,85 @@ def parameter_fields(version):
 def mount_x_settings(project):
     return project.get("arm_mount_x", {axle: {key: None for key in MOUNT_X_FIELDS}
                                         for axle in ("front", "rear")})
+
+
+def steering_settings(project):
+    """Copy saved settings or size a centered rack and pickups from the vehicle."""
+    if "steering" in project:
+        return validate_steering_settings(project["steering"])
+    vehicle = project["vehicle"]
+    height = vehicle["free_radius"]
+    settings = {}
+    for axle, axle_x, inboard_x in (("front", 0., -1.), ("rear", -vehicle["wheelbase"], 1.)):
+        track = vehicle[f"track_{axle}"]
+        settings[axle] = {
+            "tie_rod_x": axle_x + inboard_x * .10, "tie_rod_y": .41 * track,
+            "rack_x": axle_x + inboard_x * .13, "rack_z": height, "rack_length": .44 * track,
+            RACK_LIMIT_LEFT: DEFAULT_RACK_LIMIT_MM, RACK_LIMIT_RIGHT: DEFAULT_RACK_LIMIT_MM,
+            "rack_travel_mm": 0.,
+        }
+    settings["rear"]["enabled"] = False
+    return settings
+
+
+def _finite_number(value):
+    try:
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def rack_travel_bounds(settings):
+    """Return the signed rack travel interval in millimetres."""
+    right = settings.get(RACK_LIMIT_RIGHT, DEFAULT_RACK_LIMIT_MM)
+    left = settings.get(RACK_LIMIT_LEFT, DEFAULT_RACK_LIMIT_MM)
+    if not all(_finite_number(value) and value >= 0 for value in (right, left)):
+        raise ValueError("Rack 左右行程上限須為大於或等於 0 的有限數值（mm）。")
+    return (0. if right == 0. else -right), left
+
+
+def check_rack_travel(settings, travel_mm):
+    low, high = rack_travel_bounds(settings)
+    if not low <= travel_mm <= high:
+        raise ValueError(f"Rack 位移 {travel_mm:g} mm 超出允許範圍 {low:+g} ～ {high:+g} mm。")
+
+
+def validate_steering_settings(settings):
+    """Validate both axles and return a copy with the optional fields normalized."""
+    if not isinstance(settings, dict) or set(settings) != {"front", "rear"}:
+        raise ValueError("steering 需要前後軸各一組轉向設定。")
+    normalized = {}
+    required = STEERING_FIELDS.keys() - RACK_LIMIT_FIELDS
+    for axle, values in settings.items():
+        allowed = STEERING_FIELDS.keys() | {LEGACY_TIE_ROD_Z}
+        if axle == "rear":
+            allowed.add("enabled")
+        if not isinstance(values, dict) or not required <= values.keys() <= allowed:
+            raise ValueError(f"steering.{axle} 欄位不完整或含未知欄位。")
+        axle_values = normalized[axle] = values.copy()
+        axle_values.pop(LEGACY_TIE_ROD_Z, None)  # The outboard height now follows the FV instant center.
+        for key in required:
+            if not _finite_number(values[key]):
+                raise ValueError(f"steering.{axle}.{key} 必須是有限數值。")
+        for key in ("tie_rod_y", "rack_length"):
+            if values[key] <= 0:
+                raise ValueError(f"steering.{axle}.{key} 必須大於 0。")
+        travel = values["rack_travel_mm"]
+        if axle == "rear":
+            enabled = axle_values.setdefault("enabled", False)
+            if type(enabled) is not bool:
+                raise ValueError("steering.rear.enabled 必須是布林值。")
+            if not enabled:
+                travel = axle_values["rack_travel_mm"] = 0.
+        # An existing command in a file predating these limits determines the
+        # minimum needed stroke on its side. Explicit limits remain binding.
+        axle_values.setdefault(RACK_LIMIT_LEFT, max(DEFAULT_RACK_LIMIT_MM, travel))
+        axle_values.setdefault(RACK_LIMIT_RIGHT, max(DEFAULT_RACK_LIMIT_MM, -travel))
+        try:
+            check_rack_travel(axle_values, travel)
+        except ValueError as exc:
+            raise ValueError(f"steering.{axle} · {exc}") from exc
+    return normalized
 
 
 def default_project():
@@ -184,7 +275,8 @@ def project_version(project):
 def validate(project):
     """Strict schema validation; no silent fallback to car.py or ignored keys."""
     required = {"schema_version", "name", *FIELDS}
-    if not isinstance(project, dict) or not required <= set(project) or set(project) - required - {"hardpoints", "arm_mount_x", "svsa_design"}:
+    optional = {"hardpoints", "arm_mount_x", "svsa_design", "steering"}
+    if not isinstance(project, dict) or not required <= set(project) or set(project) - required - optional:
         raise ValueError("需要 SuspensionGeometryLab 專案（schema_version、name、vehicle、front、rear、analysis）。")
     version = project_version(project)
     # Optional extensions: old files keep zero installation camber and equal
@@ -298,6 +390,10 @@ def _validate_parameters(project):
             if any(value is not None and (type(value) not in (float, int) or not math.isfinite(value))
                    for value in values.values()):
                 raise ValueError(f"{axle}：A 臂 X 必須是有限數值，或 null 表示使用極限。")
+    if "steering" in project:
+        normalized = validate_steering_settings(project["steering"])
+        if normalized != project["steering"]:
+            project = {**project, "steering": normalized}
     return project
 
 

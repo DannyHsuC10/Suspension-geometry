@@ -310,6 +310,8 @@ def make_plot(page, plot, state=None, mapping=None, engine=None, groups=None, sh
         lines = [line(l.points, l.group, color=l.color, dash=l.dash)
                  for l in engine.scene.lines if visible.get(l.group, True)
                  and (show_static_references or not l.reference)]
+        lines.extend(line(endpoints, "Tie rod", color="#fb923c", width=2)
+                     for _, endpoints in engine.static_tie_rods())
         markers = [{"position": point, "name": corner+"_"+name, "color": "#fbbf24", "radius": 4}
                    for corner, points in engine.scene.geometry.get("hardpoints", {}).items() for name, point in points.items()]
         return {"title": "StaticWireframe · 靜態全車", "world_lines": lines, "dimension": 3, "markers": markers,
@@ -373,6 +375,12 @@ def make_plot(page, plot, state=None, mapping=None, engine=None, groups=None, sh
                 "ylabel": mapping["ylabel"], "zlabel": zlabel}
     spec = with_lap_distribution(spec, page, plot, mapping["mode"], lap)
     return with_current_position(spec, page, plot, state, mapping)
+
+
+def static_state(engine):
+    lines = len(engine.scene.lines) + sum(1 for _ in engine.static_tie_rods())
+    return {"metrics": {"wireframe_lines": lines, "named_points": len(static_point_rows(engine)),
+                        **engine.static_anti_metrics}, "points": {}}
 
 
 def static_point_rows(engine):

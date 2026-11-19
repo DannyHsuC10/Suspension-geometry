@@ -5,18 +5,19 @@ from pathlib import Path
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, font, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
-from .widgets import ScrollFrame
+from .widgets import ModelNotes, ScrollFrame, input_range_label
 from .project import (FIELDS, DERIVED_AXLE_FIELDS, MOUNT_X_FIELDS, mount_x_settings, travel_limits,
-                      default_project, save_project, validate)
+                      default_project, save_project, validate, validate_steering_settings)
 from .project_import import fill_import_project, read_import_project
 from .engine import Engine, Unreachable
 from .analysis import (RESULT_LABELS, LAP_CAMBER_PLOT, LAP_CAMBER_SERIES_BY_PAGE, PAGES, PLOTS, NOTES,
-                       calculate_mapping, make_plot, static_point_rows)
+                       calculate_mapping, make_plot, static_point_rows, static_state)
 from .charts import LabChart
 from .model_notes import MODEL_NOTES
 from .lap_data import LAP_PAGES, calculate_lap_camber, calculate_lap_metrics, read_lap_data
+from .steering_page import SteeringPanel
 from .tire_page import TirePanel
 from .export import STEP_PAGES, point_rows, write_report, write_csv, write_step
 from . import hardpoints
@@ -42,24 +43,8 @@ SV_ANTI_HINT = ("Anti 輸入與 SVSA 以朝另一軸為水平正向。前軸兩�
 def show_input_range(parent, entry, var, group, key):
     """Allow intermediate typing; flag drafts and reject them on commit."""
     hint = range_hint(group, key, FIELDS[group][key][1])
-    label = ttk.Label(parent, text=hint, foreground="#64748b", wraplength=280)
-    label.pack(fill="x", pady=(0, 4))
-    label.bind("<Configure>", lambda event: label.configure(wraplength=max(180, event.width-4)))
-    entry.range_label = label
-
-    def refresh(*_):
-        readonly = str(entry.cget("state")) in ("disabled", "readonly")
-        try:
-            valid = readonly or FIELD_LIMITS[group][key].accepts(float(var.get()))
-        except ValueError:
-            valid = False
-        entry.configure(style="TEntry" if valid else "Invalid.TEntry")
-        label.configure(text=hint + ("；請修正輸入" if not valid else ""),
-                        foreground="#64748b" if valid else "#b45309")
-
-    var.trace_add("write", refresh)
-    entry.bind("<FocusOut>", refresh, add=True)
-    refresh()
+    refresh = input_range_label(parent, entry, hint, FIELD_LIMITS[group][key].accepts)
+    var.trace_add("write", lambda *_: refresh(var.get()))
 
 
 def check_mount_inputs(engine):
@@ -80,6 +65,7 @@ def pose_settings(project):
     if not hardpoints.enabled(project):
         settings.pop("hardpoints", None)
     settings["arm_mount_x"] = mount_x_settings(project)
+    settings.pop("steering", None)
     return settings
 
 
@@ -474,84 +460,6 @@ class ParameterEditor(tk.Toplevel):
             self.destroy()
         except (ValueError, ArithmeticError) as exc:
             messagebox.showerror("設定無法套用", str(exc), parent=self)
-
-
-class ModelNotes(ttk.Frame):
-    """Collapsible, selectable explanation with its own scrolling area."""
-
-    def __init__(self, master, chart, sections):
-        super().__init__(master)
-        self.chart = chart
-        self.resize_job = None
-        self.toggle = ttk.Button(self, text="▸ 展開模型說明", command=self.toggle_content)
-        self.toggle.pack(anchor="w")
-        self.body = ttk.Frame(self)
-        self.text = tk.Text(
-            self.body, font=("Microsoft JhengHei UI", 10), wrap="word", width=1, height=6,
-            background="#ffffff", foreground="#0f172a", padx=12, pady=8,
-            relief="flat", highlightthickness=1, highlightbackground="#cbd5e1",
-            highlightcolor="#0f766e", takefocus=True,
-        )
-        scrollbar = ttk.Scrollbar(self.body, orient="vertical", command=self.text.yview)
-        self.text.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.text.pack(side="left", fill="both", expand=True)
-        self.text.tag_configure("section", font=("Microsoft JhengHei UI", 10, "bold"), spacing1=7, spacing3=4)
-        self.text.tag_configure("paragraph", spacing3=6)
-        self.text.tag_configure("equation", foreground="#1e3a5f", lmargin1=16, lmargin2=16,
-                                spacing3=6, wrap="char")
-        for heading, paragraphs in sections:
-            self.text.insert("end", heading + "\n", "section")
-            for paragraph in paragraphs:
-                is_equation = paragraph.startswith("  ")
-                if is_equation:
-                    paragraph = "\n".join(line.removeprefix("  ") for line in paragraph.splitlines())
-                self.text.insert("end", paragraph + "\n", "equation" if is_equation else "paragraph")
-        self.text.configure(state="disabled")
-        self.text.bind("<Shift-Tab>", self.focus_toggle)
-        self.line_height = font.Font(root=self, font=self.text.cget("font")).metrics("linespace")
-        self.chart.bind("<Configure>", self.schedule_resize, add=True)
-        self.chart.bind("<Unmap>", self.schedule_resize, add=True)
-        self.master.bind("<Configure>", self.schedule_resize, add=True)
-
-    def focus_toggle(self, _event):
-        self.toggle.focus_set()
-        return "break"
-
-    def schedule_resize(self, _event):
-        if self.body.winfo_ismapped() and self.resize_job is None:
-            self.resize_job = self.after_idle(self.resize)
-
-    def resize(self):
-        self.resize_job = None
-        # Reclaim the space currently occupied by the reader when budgeting
-        # how much of the chart area the expanded notes should use.
-        height = self.chart.winfo_height() if self.chart.winfo_ismapped() else 0
-        if self.body.winfo_ismapped():
-            height += self.body.winfo_height() + 4
-        budget = min(height // 2, int(self.master.winfo_height() * .26))
-        lines = max(2, min(14, (budget - 22) // self.line_height))
-        if lines != int(self.text.cget("height")):
-            self.text.configure(height=lines)
-
-    def toggle_content(self):
-        if self.body.winfo_manager():
-            if self.resize_job is not None:
-                self.after_cancel(self.resize_job)
-                self.resize_job = None
-            if self.focus_get() == self.text:
-                self.toggle.focus_set()
-            self.body.pack_forget()
-            self.toggle.configure(text="▸ 展開模型說明")
-        else:
-            self.resize()
-            self.body.pack(fill="x", pady=(4, 0))
-            self.toggle.configure(text="▾ 收合模型說明")
-
-    def destroy(self):
-        if self.resize_job is not None:
-            self.after_cancel(self.resize_job)
-        super().destroy()
 
 
 class Panel(ttk.Frame):
@@ -1025,9 +933,7 @@ class Panel(ttk.Frame):
                     elif key == "we":
                         state = engine.solve_we(values[0], axle)
                     else:
-                        state = {"metrics": {"wireframe_lines": len(engine.scene.lines),
-                                             "named_points": len(static_point_rows(engine)),
-                                             **engine.static_anti_metrics}, "points": {}}
+                        state = static_state(engine)
                 except ValueError as exc:
                     error = str(exc)
                 if lap_camber and not cancelled():
@@ -1167,6 +1073,8 @@ class App(tk.Tk):
         self.panels = {key: Panel(self, key) for key in PAGES}
         for key, panel in self.panels.items():
             self.notebook.add(panel, text=PAGES[key])
+        self.steering_panel = SteeringPanel(self)
+        self.notebook.insert(3, self.steering_panel, text="TV 上視圖")
         self.tire_panel = TirePanel(self)
         self.notebook.add(self.tire_panel, text="輪胎模型 · Pacejka")
         footer = ttk.Frame(self, padding=(12, 8))
@@ -1197,9 +1105,15 @@ class App(tk.Tk):
     def change_page(self, _event):
         panel = self.active
         self.step_button.state(["!disabled" if panel.key in STEP_PAGES else "disabled"])
-        for kind in ("points", "report"):
-            self.export_buttons[kind].state(["disabled" if panel is self.tire_panel else "!disabled"])
+        for kind, button in self.export_buttons.items():
+            allowed = self.export_allowed(panel, kind)
+            button.state(["!disabled" if allowed else "disabled"])
         panel.request()
+
+    def export_allowed(self, panel, kind):
+        if panel is self.steering_panel:
+            return kind in panel.export_kinds
+        return panel is not self.tire_panel or kind not in ("points", "report")
 
     def worker(self):
         while True:
@@ -1234,7 +1148,25 @@ class App(tk.Tk):
         self.project_label.configure(text=self.project["name"]+(" *" if self.dirty else ""))
         for panel in self.panels.values():
             panel.sync(keep_pose)
-        self.active.request()
+        self.steering_panel.sync()
+        if self.active is not self.steering_panel:
+            self.active.request()
+
+    def apply_steering(self, settings):
+        settings = validate_steering_settings(settings)
+        # Resolve both neutral links before replacing applied steering settings.
+        for axle, axle_settings in settings.items():
+            self.engine.centered_steering_pickups(axle, axle_settings)
+        if settings != self.project.get("steering"):
+            # The static view and STEP exporter read the applied steering dimensions.
+            self.project["steering"] = copy.deepcopy(settings)
+            self.engine.project["steering"] = copy.deepcopy(settings)
+            self.dirty = True
+            self.project_label.configure(text=self.project["name"] + " *")
+            panel = self.panels["static"]
+            panel._chart_key = None
+            if self.active is panel:
+                panel.request()
 
     def open_parameters(self):
         if self.editor is not None and self.editor.winfo_exists():
@@ -1316,7 +1248,7 @@ class App(tk.Tk):
         self.panels["we"].render()
         self.status.set(f"已匯入 {self.lap_path.name} · {count:,} 筆")
         if not lap_data.poses:
-            self.status.set(self.status.get() + " · 缺少車身姿態或轉彎方向，僅供行程疊圖")
+            self.status.set(self.status.get() + " · 缺少車身姿態或轉彎方向，無法產生圈速 Camber 圖")
         elif self.active.key == "we" and not lap_data.front_steer_deg:
             self.status.set(self.status.get() + " · 缺少左右前輪轉角，無法產生輪端圈速 Camber 圖")
         self.toggle_lap()
@@ -1327,7 +1259,9 @@ class App(tk.Tk):
         for key in LAP_PAGES:
             self.panels[key].render()
         panel = self.active
-        if (self.show_lap.get() and panel.key in LAP_PAGES and panel.plot_key not in ("motion", LAP_CAMBER_PLOT[0])
+        if panel is self.steering_panel:
+            panel.render()
+        elif (self.show_lap.get() and panel.key in LAP_PAGES and panel.plot_key not in ("motion", LAP_CAMBER_PLOT[0])
                 and panel.key not in self.lap_cache):
             panel.request()
 
@@ -1347,17 +1281,22 @@ class App(tk.Tk):
 
     def export(self, kind):
         panel = self.active
-        if panel is self.tire_panel and kind in ("points", "report"):
-            return
         if kind == "step" and panel.key not in STEP_PAGES:
             self.status.set("STEP 匯出適用於前 FV、後 FV、SV 與靜態全車。")
+            return
+        if not self.export_allowed(panel, kind):
             return
         if kind == "mapping" and panel.key == "static":
             self.status.set("靜態全車請使用硬點 CSV；範圍掃描在 FV / SV / WE3D 頁。")
             return
         if not getattr(panel, "ready_for_export", False):
-            self.status.set("請先計算有效的輪胎工況。" if panel is self.tire_panel else
-                            "正在計算目前姿態，完成後即可匯出。")
+            if panel is self.tire_panel:
+                message = "請先計算有效的輪胎工況。"
+            elif panel is self.steering_panel:
+                message = "請先在 TV 上視圖取得有效的轉向結果。"
+            else:
+                message = "正在計算目前姿態，完成後即可匯出。"
+            self.status.set(message)
             return
         if kind in ("state", "points", "step") and not panel.state:
             self.status.set("目前姿態無解；請調整滑桿後再匯出。")
@@ -1422,6 +1361,7 @@ class App(tk.Tk):
         if not self.confirm_unsaved():
             return
         self.closing = True
+        self.steering_panel.token += 1
         for panel in self.panels.values():
             panel.token += 1
             if panel.timer:

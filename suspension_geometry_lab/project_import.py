@@ -5,8 +5,10 @@ import math
 
 from . import hardpoints
 from .engine import Engine
-from .project import (LEGACY_ANTI_KEYS, MOUNT_X_FIELDS, default_project, parameter_fields,
-                      project_version, read_project, static_objects)
+from .input_limits import VEHICLE_LIMITS
+from .project import (LEGACY_ANTI_KEYS, LEGACY_TIE_ROD_Z, MOUNT_X_FIELDS, RACK_LIMIT_FIELDS, STEERING_FIELDS,
+                      default_project, parameter_fields, project_version, read_project, static_objects,
+                      steering_settings)
 
 
 GROUP_LABELS = {"vehicle": "車輛／輪胎", "front": "前軸", "rear": "後軸", "analysis": "掃描範圍"}
@@ -191,6 +193,29 @@ def _hardpoint_fields(project):
                                    f"{corner}/{name} {label} · {axis}", "mm", default, 1000)
 
 
+def _steering_fields(project, defaults):
+    settings = _section(project, "steering", {"front", "rear"}, "steering")
+    # Use the imported dimensions where available, and the baseline for blanks.
+    vehicle = defaults["vehicle"].copy()
+    for key in ("wheelbase", "track_front", "track_rear", "free_radius"):
+        value = project["vehicle"].get(key)
+        limit = VEHICLE_LIMITS[key]
+        if type(value) in (int, float) and limit.low <= value <= limit.high:
+            vehicle[key] = value
+    baseline = steering_settings({"vehicle": vehicle})
+    optional = {*RACK_LIMIT_FIELDS, "enabled"}
+    for axle in ("front", "rear"):
+        fields = STEERING_FIELDS | {"enabled": ("後輪轉向", "")} if axle == "rear" else STEERING_FIELDS
+        values = _section(settings, axle, fields.keys() | {LEGACY_TIE_ROD_Z}, f"steering.{axle}")
+        values.pop(LEGACY_TIE_ROD_Z, None)
+        for key, (label, unit) in fields.items():
+            if key in optional and key not in values:
+                continue  # Older projects get these defaults when validated.
+            if _blank(values.get(key)):
+                yield MissingField(("steering", axle, key), f"{GROUP_LABELS[axle]} · {label}",
+                                   unit, baseline[axle][key])
+
+
 def read_import_project(path):
     project = read_project(path)
     defaults = default_project()
@@ -202,7 +227,8 @@ def read_import_project(path):
     for axle in ("front", "rear"):
         if isinstance(project.get(axle), dict):
             project[axle].setdefault("static_camber_deg", 0.)
-    allowed = {"schema_version", "name", "vehicle", "front", "rear", "analysis", "arm_mount_x", "hardpoints"}
+    allowed = {"schema_version", "name", "vehicle", "front", "rear", "analysis", "arm_mount_x", "hardpoints",
+               "steering"}
     if version == 5:
         allowed.add("svsa_design")
     if project.keys() - allowed:
@@ -235,6 +261,8 @@ def read_import_project(path):
                                             "", False))
     if "hardpoints" in project:
         missing.extend(_hardpoint_fields(project))
+    if "steering" in project:
+        missing.extend(_steering_fields(project, defaults))
     return project, missing
 
 

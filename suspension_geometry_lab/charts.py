@@ -112,26 +112,34 @@ class LabChart(Chart):
             return
         points = spec["lap_points"]
         total = spec["lap_total"]
-        color = "#f8fafc"
-        status = f"LapSim · {len(points):,} / {total:,} 筆"
-        if len(points) < total:
-            status += f"（略過 {total - len(points):,} 筆）"
-        self.text(max(self.canvas.winfo_width(), 300)-20, 22, status, color, 10, "e")
+        default_color = "#f8fafc"
+        visible = spec.get("lap_visible", len(points))
+        status = f"LapSim · {visible:,} / {total:,} 筆"
+        if visible < total:
+            status += f"（略過 {total - visible:,} 筆）"
+        self.text(max(self.canvas.winfo_width(), 300)-20, 22, status, default_color, 10, "e")
         if self.view is None:
             return
         l, t, r, b = self.bounds
         xmin, xmax, ymin, ymax = self.view
-        outline, radius = BG, 2.5
-        occupied = set()
-        for point in points:
+        outline = BG
+        occupied = {}
+        colors = spec.get("lap_colors")
+        for index, point in enumerate(points):
             x, y = project(point)
             px = l+(x-xmin)/(xmax-xmin)*(r-l)
             py = b-(y-ymin)/(ymax-ymin)*(b-t)
             if not (l <= px <= r and t <= py <= b):
                 continue
+            color = colors[index] if colors is not None else default_color
             pixel = round(px/2), round(py/2)
-            if pixel not in occupied:
-                occupied.add(pixel)
+            occupied.setdefault(pixel, {}).setdefault(color, (px, py))
+        for layers in occupied.values():
+            px, py = next(iter(layers.values()))
+            for index, color in enumerate(layers):
+                # Nested fills keep both wheel colors legible when their
+                # measured operating points occupy the same screen pixel.
+                radius = 2.5 + 2. * (len(layers)-index-1)
                 self.canvas.create_oval(px-radius, py-radius, px+radius, py+radius,
                                         fill=color, outline=outline, width=radius/2)
                 self.circles.append((px, py, radius, color, False, outline, "LapSim"))

@@ -135,10 +135,12 @@ function markers(items, project, screen, dimension, bounds) {
   }).join("");
 }
 
-function lapPoints(points, project, screen, dimension) {
+function lapPoints(points, project, screen, dimension, colors) {
   if (!points?.length) return "";
-  return '<g fill="#fbbf24" fill-opacity=".5">' + points.map(point =>
-    valid(point, dimension) ? '<circle' + pointAttr(screen(project(point))) + ' r="2.3"/>' : "").join("") + "</g>";
+  return '<g fill="#fbbf24" fill-opacity=".65">' + points.map((point, index) =>
+    valid(point, dimension) ? '<circle' + pointAttr(screen(project(point))) +
+      ' r="' + (colors && index % 2 === 0 ? '3.2' : '2.3') + '"' +
+      (colors ? ' fill="' + xml(colors[index]) + '"' : '') + '/>' : "").join("") + "</g>";
 }
 
 function meshLayer(mesh, project, screen, [min, max]) {
@@ -329,6 +331,7 @@ export class LabChart {
       for (const curve of curves) fitPoints.push(...curve.x.map((x, i) => [x, curve.y[i]]));
       if (spec.bin_edges) fitPoints.push([spec.bin_edges[0], 0], [spec.bin_edges.at(-1), 0]);
       for (const point of spec.lap_points ?? []) fitPoints.push(point);
+      for (const point of spec.fit_points ?? []) fitPoints.push(point);
     }
     const ranges = extent(fitPoints, 2);
     if (world.length && spec.projection !== "Iso") this.fittedRanges ??= ranges;
@@ -405,14 +408,14 @@ export class LabChart {
       '<defs><clipPath id="plot-clip"><rect x="' + bounds.left + '" y="' + bounds.top +
       '" width="' + width + '" height="' + height + '"/></clipPath></defs>' +
       text(15, 25, title, {color: "#f6f9ff", size: titleSize}) + grid +
-      '<g clip-path="url(#plot-clip)">' + data + lapPoints(spec.lap_points, project, screen, dimension) +
+      '<g clip-path="url(#plot-clip)">' + data + lapPoints(spec.lap_points, project, screen, dimension, spec.lap_colors) +
       guides + markers(labels, project, screen, dimension, bounds) + "</g>" + meshLabels +
       (spec.current_status ? text(W - 12, 42, spec.current_status, {color: "#fbbf24", anchor: "end", size: Math.min(12, (W - 24) / (spec.current_status.length * .55))}) : "") + "</svg>";
     this.host.innerHTML = this.svg;
     const worldNames = {front: "Front FV plane", rear: "Rear FV plane", sv: "SV plane", physical: "Physical geometry"};
     const keys = spec.series ? series.map((item, index) => [item.name, item.color ?? palette[index % palette.length]]) :
       world.map(item => [worldNames[item.name] ?? item.name, item.color ?? "#9bb2cd"]);
-    if (spec.lap_points?.length) keys.push(["LapSim samples (" + spec.lap_points.length + ")", "#fbbf24"]);
+    if (spec.lap_points?.length) keys.push(["LapSim samples (" + (spec.lap_visible ?? spec.lap_points.length) + ")", "#fbbf24"]);
     const options = Array.from(new Map(keys)).filter(([name]) => name);
     this.legend.hidden = options.length === 0;
     this.legend.innerHTML = options.map(([name, color]) =>

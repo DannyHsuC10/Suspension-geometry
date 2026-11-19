@@ -15,7 +15,7 @@ import numpy as np
 from suspension_geometry_lab import hardpoints
 from suspension_geometry_lab.engine import Engine
 from suspension_geometry_lab.export import write_step
-from suspension_geometry_lab.project import default_project
+from suspension_geometry_lab.project import default_project, steering_settings
 from suspension_geometry_lab.static.fv.wireframe_geometry import project_fv
 
 
@@ -114,6 +114,21 @@ class StepSolidTests(unittest.TestCase):
         tilted_links = [(n, [s[0].tolist()+s[1].tolist()+[s[2]] for s in ss]) for n, ss in tilted if not n.endswith("tire")]
         flat_links = [(n, [s[0].tolist()+s[1].tolist()+[s[2]] for s in ss]) for n, ss in flat if not n.endswith("tire")]
         self.assertEqual(tilted_links, flat_links)
+
+    def test_static_tie_rod_cylinders_follow_the_centered_link_axes(self):
+        settings = steering_settings(self.engine.project)
+        settings["front"].update(tie_rod_x=.11, tie_rod_y=.54,
+                                 rack_x=.065, rack_z=.22, rack_length=.48, rack_travel_mm=11.)
+        self.engine = Engine(self.engine.project | {"steering": settings})
+        _, bodies = self.export("static", include_tires=False, tube_diameter_mm=14.)
+        self.assertEqual(len(bodies), 24)
+        rods = {name: surfaces for name, surfaces in bodies if name.endswith(" tie rod")}
+        self.assertEqual(set(rods), {f"{corner} tie rod" for corner in ("FL", "FR", "RL", "RR")})
+        for corner, (start, end) in self.engine.static_tie_rods():
+            for center, axis, radius in rods[f"{corner} tie rod"]:
+                np.testing.assert_allclose(center, start*1000, atol=1e-9)
+                np.testing.assert_allclose(axis, (end-start)/np.linalg.norm(end-start), atol=1e-12)
+                self.assertAlmostEqual(radius, 7.)
 
     def test_dynamic_pages_have_only_physical_members_and_current_wheel_centers(self):
         for page, count, tires in (("front", 8, 2), ("rear", 8, 2), ("sv", 6, 4)):

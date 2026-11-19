@@ -2,6 +2,7 @@ const notes = {
   front: () => import("./geometry-fv.js").then(module => module.frontFV),
   rear: () => import("./geometry-fv.js").then(module => module.rearFV),
   sv: () => import("./geometry-sv-we.js").then(module => module.sideView),
+  tv: () => import("./geometry-tv.js").then(module => module.topView),
   we: () => import("./geometry-sv-we.js").then(module => module.wheelEnd),
   static: () => import("./geometry-static.js").then(module => module.staticVehicle),
 };

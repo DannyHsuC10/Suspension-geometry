@@ -13,6 +13,7 @@ TRAVEL_COLUMNS = tuple(f"zs_minus_zu_{corner}_mm" for corner in ("FL", "FR", "RL
 POSE_COLUMNS = ("heave_mm", "roll_deg", "pitch_deg")
 TURN_COLUMNS = ("curvature_1_m", "ay_g")
 FRONT_STEER_COLUMNS = ("steer_FL_deg", "steer_FR_deg")
+REAR_STEER_COLUMNS = ("steer_RL_deg", "steer_RR_deg")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class LapData:
     poses: tuple[LapPose, ...]
     turn_column: str | None
     front_steer_deg: tuple[tuple[float, float], ...] = ()
+    rear_steer_deg: tuple[tuple[float, float] | None, ...] = ()
 
 
 def read_lap_data(path):
@@ -36,6 +38,7 @@ def read_lap_data(path):
     travels = []
     poses = []
     front_steer = []
+    rear_steer = []
     with Path(path).open(encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream, strict=True)
         header = reader.fieldnames or []
@@ -47,6 +50,7 @@ def read_lap_data(path):
         if any(header.count(name) != 1 for name in pose_columns):
             raise ValueError("CSV 有重複的車身姿態或轉彎方向欄位。")
         has_steer = all(name in header for name in FRONT_STEER_COLUMNS)
+        has_rear_steer = all(header.count(name) == 1 for name in REAR_STEER_COLUMNS)
         if has_steer and any(header.count(name) != 1 for name in FRONT_STEER_COLUMNS):
             raise ValueError("CSV 有重複的前輪轉向角欄位。")
         for row in reader:
@@ -57,9 +61,16 @@ def read_lap_data(path):
             if has_steer:
                 fl, fr = FRONT_STEER_COLUMNS
                 front_steer.append((lap_number(row, fl, reader.line_num), lap_number(row, fr, reader.line_num)))
+            if has_rear_steer:
+                rl, rr = REAR_STEER_COLUMNS
+                try:
+                    rear_steer.append((lap_number(row, rl, reader.line_num), lap_number(row, rr, reader.line_num)))
+                except ValueError:
+                    # Preserve row alignment and keep existing FV/SV imports usable.
+                    rear_steer.append(None)
     if not travels:
         raise ValueError("CSV 沒有圈速模擬資料。")
-    return LapData(tuple(travels), tuple(poses), turn_column if poses else None, tuple(front_steer))
+    return LapData(tuple(travels), tuple(poses), turn_column if poses else None, tuple(front_steer), tuple(rear_steer))
 
 
 def lap_number(row, name, line):

@@ -11,13 +11,14 @@ from time import monotonic
 import numpy as np
 
 import lab_formats
+from tv_worker import TVAnalysis, NOTE as TV_NOTE, PLOTS as TV_PLOTS
 from suspension_geometry_lab import analysis, hardpoints
 from suspension_geometry_lab.caster_search import search_front_caster
 from suspension_geometry_lab.engine import Unreachable
 from suspension_geometry_lab.fvsa_search import search_fvsa
 from suspension_geometry_lab.input_limits import AXLE_LIMITS
 from suspension_geometry_lab.lap_data import LAP_PAGES, calculate_lap_camber, calculate_lap_metrics, read_lap_data
-from suspension_geometry_lab.project import FIELDS, travel_limits
+from suspension_geometry_lab.project import FIELDS, steering_settings, travel_limits
 from suspension_geometry_lab.roll_center_search import SearchSettings, search_balanced_rear_roll_center, search_roll_center
 from suspension_geometry_lab.svsa_search import SVSASearchSettings, search_svsa
 
@@ -157,6 +158,7 @@ _lap_name = None
 _mapping_cache = {}
 _lap_cache = {}
 _last_pose = None
+_tv = None
 
 
 def view_fields(page):
@@ -183,13 +185,17 @@ def view_fields(page):
 
 
 def view_metadata():
-    return {page: {"label": PAGE_LABELS[page], "note": NOTES[page],
+    views = {page: {"label": PAGE_LABELS[page], "note": NOTES[page],
                    "plots": [{"key": key, "label": PLOT_LABELS[page][key]} for key, _ in analysis.PLOTS[page]],
                    "fields": view_fields(page), "lap": page in (*LAP_PAGES, "we"),
                    "lapOverlay": page in LAP_PAGES,
                    "camberSeries": [{"key": key, "label": CAMBER_LABELS[key]}
                                     for key, *_ in analysis.LAP_CAMBER_SERIES_BY_PAGE.get(page, ())]}
             for page in PAGE_LABELS}
+    views["tv"] = {"label": "Top View (TV)", "note": TV_NOTE, "fields": [],
+                   "plots": [{"key": key, "label": label} for key, label in TV_PLOTS.items()],
+                   "lap": True, "lapOverlay": True, "camberSeries": []}
+    return views
 
 
 def lap_descriptor():
@@ -198,12 +204,14 @@ def lap_descriptor():
 
 
 def project_summary():
-    return {**lab_formats.project_response(_engine), "lap": lap_descriptor()}
+    return {**lab_formats.project_response(_engine), "lap": lap_descriptor(),
+            "steering": steering_settings(_engine.project)}
 
 
 def install_project(project):
-    global _engine, _last_pose
+    global _engine, _last_pose, _tv
     _engine = lab_formats.validated_engine(project)
+    _tv = TVAnalysis(_engine)
     _last_pose = None
     _mapping_cache.clear()
     _lap_cache.clear()
@@ -314,9 +322,7 @@ def solve(payload):
             elif page == "we":
                 state = _engine.solve_we(inputs[0], axle)
             else:
-                state = {"metrics": {"wireframe_lines": len(_engine.scene.lines),
-                                     "named_points": len(analysis.static_point_rows(_engine)),
-                                     **_engine.static_anti_metrics}, "points": {}}
+                state = analysis.static_state(_engine)
         except Unreachable as exc:
             error = english_error(exc)
         _last_pose = key, state, error
@@ -587,6 +593,22 @@ def handle(action, payload):
         return install_project(payload["project"])
     if _engine is None:
         raise ValueError("Initialize the geometry engine first.")
+    if payload.get("page") == "tv":
+        result = _tv.result(payload, _lap)
+        if action in ("plot", "solve"):
+            return result
+        if action == "export-data":
+            kind = payload.get("kind")
+            if kind == "mapping":
+                return lab_formats.csv_download(_tv.sweep(payload.get("axle", "front"))["rows"])
+            if kind == "state":
+                if result["state"] is None:
+                    raise ValueError(result["error"] or "The current TV pose is unreachable.")
+                return lab_formats.csv_download([result["state"]["metrics"]])
+            if kind == "report":
+                return lab_formats.report_download(_engine, payload, result["state"],
+                                                   _tv.sweep(payload.get("axle", "front")))
+            raise ValueError("TV supports pose/sweep CSV and chart/report downloads. Use Static Full Car for STEP.")
     if action == "solve":
         return solve(payload)
     if action == "plot":
