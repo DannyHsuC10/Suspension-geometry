@@ -216,7 +216,7 @@ export class LabChart {
       this.observedWidth = this.host.clientWidth;
     }).observe(host);
     host.addEventListener("wheel", event => {
-      if (!this.spec) return;
+      if (!this.spec || !(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
       this.zoomBy(Math.exp(-event.deltaY * 0.0012));
     }, {passive: false});
@@ -287,7 +287,7 @@ export class LabChart {
     const hasChart = spec?.mesh ? meshPoints.length : spec?.world_lines?.length || spec?.series?.length;
     this.readCursor = null;
     this.instructions = spec?.projection === "Iso" ?
-      "Drag to rotate. Shift-drag to pan. Scroll to zoom." : "Drag to pan. Scroll to zoom.";
+      "Drag to rotate. Shift-drag to pan. Ctrl/⌘ + scroll to zoom." : "Drag to pan. Ctrl/⌘ + scroll to zoom.";
     this.help.textContent = this.instructions;
     if (!hasChart) {
       this.svg = "";

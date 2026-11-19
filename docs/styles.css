@@ -111,7 +111,7 @@ svg.brand-icon { padding: .48rem; }
 .workspace { padding-block: .95rem 2rem; }
 .tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .85rem; }
 .tabs button, .tabs a { padding: .56rem .9rem; white-space: nowrap; }
-.workspace-grid { display: grid; grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr); gap: .9rem; align-items: start; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: .9rem; align-items: start; }
 .sidebar, .main-column { display: grid; align-content: start; gap: .85rem; min-width: 0; }
 .panel {
   min-width: 0;
@@ -225,6 +225,36 @@ thead { position: sticky; top: 0; z-index: 1; background: #ecf2f7; }
 .metrics-table th, .metrics-table td { white-space: nowrap; }
 .metrics-table tbody tr:hover { background: #f4f8fb; }
 
+.geometry-notes > summary {
+  padding: .85rem .95rem;
+  margin: 0;
+  font-size: 1.07rem;
+  line-height: 1.4;
+}
+.geometry-notes > summary::marker { color: var(--accent); }
+.geometry-notes > summary:focus-visible { outline-offset: -4px; }
+.geometry-notes[open] > summary { border-bottom: 1px solid var(--line); }
+.notes-content {
+  min-width: 0;
+  padding: 1rem clamp(.85rem, 2.3vw, 1.6rem) 1.4rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.notes-content article > :first-child { margin-top: 0; }
+.notes-content h3 { font-size: 1.2rem; }
+.notes-content h4 { margin-block: 1.35rem .38rem; line-height: 1.4; }
+.notes-content h3 + p, .notes-content p + p { margin-top: .6rem; }
+.notes-content ol, .notes-content ul { margin-block: .65rem 1rem; padding-inline-start: 1.3rem; }
+.notes-content li + li { margin-top: .55rem; }
+.notes-content li p + p { margin-top: .4rem; }
+.notes-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: .2rem;
+}
+.notes-content .katex-display > .katex { width: max-content; min-width: 100%; }
+.notes-content .katex { font-size: 1.03em; }
+
 dialog {
   width: min(56rem, calc(100% - 2rem));
   max-height: min(90dvh, 54rem);
@@ -256,8 +286,33 @@ dialog h2 { font-size: 1.2rem; }
 .app-dialog > form > p { color: var(--muted); font-size: .875rem; }
 .app-dialog > form > .dialog-actions { border-top: 1px solid var(--line); padding-top: .75rem; }
 
+@media (min-width: 851px) {
+  body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  .site-header { flex: none; }
+  .workspace {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    flex: 1;
+    min-height: 0;
+    padding-bottom: .7rem;
+  }
+  .workspace-grid {
+    grid-template-columns: clamp(18rem, 29%, 27rem) minmax(0, 1fr);
+    min-height: 0;
+    align-items: stretch;
+  }
+  .sidebar, .main-column {
+    min-height: 0;
+    grid-auto-rows: max-content;
+    overflow: hidden auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+  }
+  .sidebar:focus-visible, .main-column:focus-visible { outline-offset: -3px; }
+  .main-column .table-scroll { max-height: none; }
+}
+
 @media (max-width: 1050px) {
-  .workspace-grid { grid-template-columns: minmax(14rem, 16.5rem) minmax(0, 1fr); }
   .chart-panel > .panel-header { flex-wrap: wrap; }
   .chart-toolbar { justify-content: flex-start; }
 }
@@ -269,6 +324,7 @@ dialog h2 { font-size: 1.2rem; }
   .chart-panel { grid-row: 1; }
   .sidebar { grid-row: 2; }
   .metrics-panel { grid-row: 3; }
+  .geometry-notes { grid-row: 4; }
   .tabs { gap: .35rem; }
   .tabs button, .tabs a { flex: 0 0 auto; }
   .chart-host, .chart-host canvas { min-height: 20rem; }

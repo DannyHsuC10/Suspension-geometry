@@ -1,8 +1,10 @@
 import {LabChart} from "./chart.js";
+import {setupGeometryNotes} from "./geometry-notes.js";
 import {downloadFile, setupProjectSettings} from "./settings.js";
 
 const $ = id => document.getElementById(id);
 const chart = new LabChart($("chart"), $("chart-legend"), $("chart-help"));
+const showGeometryNotes = setupGeometryNotes($("geometry-notes"), $("geometry-note-title"), $("geometry-note-content"));
 const titles = {front: "Front FV", rear: "Rear FV", sv: "Side View (SV)", we: "Wheel End (WE3D)", static: "Static Full Car"};
 const formats = {state: "Pose CSV", points: "Hardpoints CSV", mapping: "Sweep CSV", svg: "SVG chart",
   png: "PNG chart", report: "HTML report / Print to PDF", step: "STEP (AP214)"};
@@ -69,6 +71,7 @@ const states = Object.fromEntries(Object.keys(titles).map(page => [page, {
 }]));
 const state = () => states[page];
 let page = "front";
+let renderedPage;
 let project, views, fields, derived, metricLabels, camberPlot, hardpointNote, lap, lapFile;
 let showLap = true;
 let designInputs = [];
@@ -283,7 +286,13 @@ function renderPage() {
   $("plot-controls").hidden = false;
   renderInputs();
   renderViewOptions();
+  showGeometryNotes(page, titles[page]);
   clearResults();
+  if (renderedPage !== page) {
+    $("design-pane").scrollTop = 0;
+    $("results-pane").scrollTop = 0;
+    renderedPage = page;
+  }
   scheduleUpdate();
 }
 
@@ -668,6 +677,7 @@ function bind() {
 
 async function start() {
   bind();
+  showGeometryNotes(page, titles[page]);
   try {
     const summary = await request("init");
     ({views, metricLabels, camberPlot, hardpointNote} = summary);

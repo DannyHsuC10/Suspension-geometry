@@ -37,7 +37,7 @@
       <button class="tab" type="button" data-page="static" data-ready disabled>Static Full Car</button>
     </nav>
     <div class="workspace-grid">
-      <aside class="panel sidebar" aria-labelledby="inputs-heading">
+      <aside class="panel sidebar" id="design-pane" aria-labelledby="inputs-heading" tabindex="0">
         <div class="panel-header">
           <h2 class="section-heading" id="inputs-heading">Design inputs</h2>
           <p id="geometry-mode"></p>
@@ -50,7 +50,7 @@
           <p class="form-error" id="design-error" role="alert" hidden></p>
         </form>
       </aside>
-      <div class="main-column">
+      <div class="main-column" id="results-pane" role="region" aria-label="Geometry results" tabindex="0">
         <section class="panel chart-panel" aria-labelledby="view-heading">
           <div class="panel-header chart-heading">
             <div>
@@ -80,7 +80,7 @@
               <p class="chart-empty">Loading the suspension geometry solver…</p>
             </div>
             <figcaption class="chart-caption">
-              <span id="chart-help">Scroll to zoom. Drag to pan.</span>
+              <span id="chart-help">Drag to pan. Ctrl/⌘ + scroll to zoom.</span>
               <span id="coverage"></span>
             </figcaption>
           </figure>
@@ -102,6 +102,10 @@
             </table>
           </div>
         </section>
+        <details class="panel geometry-notes" id="geometry-notes">
+          <summary id="geometry-note-title">Geometry notes · Front FV</summary>
+          <div class="notes-content" id="geometry-note-content"></div>
+        </details>
       </div>
     </div>
     <p class="status" id="status" role="status" aria-live="polite">Starting browser solver…</p>
