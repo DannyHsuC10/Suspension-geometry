@@ -22,7 +22,9 @@ const number = value => value == null ? "N/A" : typeof value === "number" ?
 
 class Solver {
   constructor() {
-    this.worker = new Worker(new URL("./py-worker.js", import.meta.url));
+    const workerUrl = new URL("./py-worker.js", import.meta.url);
+    workerUrl.search = new URL(import.meta.url).search;
+    this.worker = new Worker(workerUrl);
     this.requests = new Map();
     this.next = 0;
     this.worker.addEventListener("message", ({data}) => {
@@ -477,11 +479,70 @@ const searches = {
   "roll-center": {title: "Optimize roll center", fields: [["lower_m", "Minimum design height (m)", -0.005, -0.5, 1]]},
   fvsa: {title: "Optimize FVSA", note: "Find the longest front-view swing arm that meets the absolute camber limit across the loaded LapSim lap.",
     fields: [["max_camber_deg", "Maximum absolute camber (deg)", 2, 0, 90]]},
-  svsa: {title: "Optimize SVSA", note: "Search both axles for signed swing arm lengths that meet the caster-change targets at straight heave.",
-    fields: [["heave_mm", "Test heave (mm)", 7], ["front_min_deg", "Minimum front caster change (deg)", 0.15, 0],
-      ["rear_max_deg", "Maximum rear caster change (deg)", 0.1, 0]]},
+  svsa: {title: "Optimize SVSA", note: "Compare absolute caster change from zero travel to the test heave at zero pitch. The front search starts at 1 m and the rear at 0.5 m. Both advance in 0.5 m steps up to 15 m."},
   caster: {title: "Optimize front caster", note: "Find the front design caster that places mean outer-wheel cornering camber closest to zero using LapSim body pose and steering data.", fields: []},
 };
+
+let svsaSearchSettings = {
+  heave_mm: 7, front_bound: "min", front_limit_deg: 0.15, rear_bound: "max", rear_limit_deg: 0.1,
+};
+
+function searchNumberField([name, title, value, min, max]) {
+  const label = document.createElement("label");
+  label.className = "field";
+  label.textContent = title;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.name = name;
+  input.value = value;
+  input.step = "any";
+  input.required = true;
+  if (min != null) input.min = min;
+  if (max != null) input.max = max;
+  label.append(input);
+  return label;
+}
+
+function svsaAxleField(axle, title) {
+  const group = document.createElement("fieldset");
+  group.className = "svsa-limit";
+  const legend = document.createElement("legend");
+  legend.textContent = title + " axle";
+  const choices = document.createElement("div");
+  choices.className = "svsa-bound-choices";
+  const limitKey = axle + "_limit_deg";
+  const limit = searchNumberField([limitKey, title + " absolute caster change (deg)", svsaSearchSettings[limitKey], 0]);
+  const hint = document.createElement("small");
+  hint.id = "svsa-" + axle + "-strategy";
+  hint.className = "field-note";
+  limit.querySelector("input").setAttribute("aria-describedby", hint.id);
+
+  function showStrategy(bound) {
+    const lower = bound === "min";
+    limit.firstChild.textContent = title + (lower ? " minimum" : " maximum") + " |ΔCaster| (deg)";
+    hint.textContent = lower ?
+      "Choose the longest qualifying length before the first failed candidate." :
+      "Choose the shortest valid length within the upper limit.";
+  }
+
+  for (const [bound, label] of [["min", "Lower limit"], ["max", "Upper limit"]]) {
+    const choice = document.createElement("label");
+    choice.className = "check";
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = axle + "_bound";
+    input.value = bound;
+    input.required = true;
+    input.checked = svsaSearchSettings[input.name] === bound;
+    input.addEventListener("change", () => showStrategy(bound));
+    choice.append(input, label);
+    choices.append(choice);
+  }
+
+  showStrategy(svsaSearchSettings[axle + "_bound"]);
+  group.append(legend, choices, limit, hint);
+  return group;
+}
 
 function openSearch(kind) {
   try {
@@ -496,21 +557,13 @@ function openSearch(kind) {
       "Import a LapSim CSV from this view before running the search." : "";
     $("run-search").disabled = false;
     $("cancel-search").textContent = "Cancel";
-    $("search-fields").replaceChildren(...search.fields.map(([name, title, value, min, max]) => {
-      const label = document.createElement("label");
-      label.className = "field";
-      label.textContent = title;
-      const input = document.createElement("input");
-      input.type = "number";
-      input.name = name;
-      input.value = value;
-      input.step = "any";
-      input.required = true;
-      if (min != null) input.min = min;
-      if (max != null) input.max = max;
-      label.append(input);
-      return label;
-    }));
+    if (kind === "svsa") {
+      const heave = searchNumberField(["heave_mm", "Test heave (mm)", svsaSearchSettings.heave_mm]);
+      heave.classList.add("wide");
+      $("search-fields").replaceChildren(heave, svsaAxleField("front", "Front"), svsaAxleField("rear", "Rear"));
+    } else {
+      $("search-fields").replaceChildren(...search.fields.map(searchNumberField));
+    }
     $("search-dialog").showModal();
   } catch (error) {
     showStatus(error.message, true);
@@ -534,7 +587,9 @@ async function runSearch() {
   task.running = true;
   $("run-search").disabled = true;
   $("search-result").textContent = "Starting optimization solver…";
-  const settings = Object.fromEntries(Array.from(new FormData($("search-form")), ([key, value]) => [key, Number(value)]));
+  const settings = Object.fromEntries(Array.from(new FormData($("search-form")), ([key, value]) => (
+    [key, key.endsWith("_bound") ? value : Number(value)]
+  )));
   try {
     const validated = await request("project-apply", {project: task.candidate, base: project});
     if (task !== searchTask) return;
@@ -548,6 +603,10 @@ async function runSearch() {
         (progress.reason ? " · " + progress.reason : "");
     });
     if (task !== searchTask) return;
+    if (task.kind === "svsa") {
+      svsaSearchSettings = settings;
+      $("run-search").disabled = Boolean(result.project);
+    }
     if (result.project) {
       if (result.view) {
         const {page: target, ...view} = result.view;

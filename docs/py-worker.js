@@ -20,7 +20,10 @@ const files = [
 
 async function start() {
   const source = Promise.all(files.map(async name => {
-    const response = await fetch(new URL(name, self.location.href));
+    // Match the interface's release version for every solver source.
+    const url = new URL(name, self.location.href);
+    url.search = self.location.search;
+    const response = await fetch(url);
     if (!response.ok) throw new Error("Could not load " + name + " (" + response.status + ").");
     return [name, new Uint8Array(await response.arrayBuffer())];
   }));

@@ -17,13 +17,41 @@ ANGLE_TOLERANCE_DEG = 1e-9
 @dataclass(frozen=True)
 class SVSASearchSettings:
     heave_mm: float = 7.
-    front_min_change_deg: float = .15
-    rear_max_change_deg: float = .1
+    front_min_change_deg: float | None = .15
+    rear_max_change_deg: float | None = .1
+    front_max_change_deg: float | None = None
+    rear_min_change_deg: float | None = None
+
+    @classmethod
+    def from_bounds(cls, heave_mm, front_bound, front_limit_deg, rear_bound, rear_limit_deg):
+        if front_bound not in ("min", "max") or rear_bound not in ("min", "max"):
+            raise ValueError("前後軸各需選擇一個 Caster 絕對變化量下限或上限。")
+        return cls(
+            heave_mm=heave_mm,
+            front_min_change_deg=front_limit_deg if front_bound == "min" else None,
+            rear_max_change_deg=rear_limit_deg if rear_bound == "max" else None,
+            front_max_change_deg=front_limit_deg if front_bound == "max" else None,
+            rear_min_change_deg=rear_limit_deg if rear_bound == "min" else None,
+        )
+
+    def criterion(self, axle):
+        if axle == "front":
+            minimum, maximum = self.front_min_change_deg, self.front_max_change_deg
+        elif axle == "rear":
+            minimum, maximum = self.rear_min_change_deg, self.rear_max_change_deg
+        else:
+            raise ValueError("SVSA 搜尋只適用於前／後軸。")
+        if (minimum is None) == (maximum is None):
+            raise ValueError("前後軸各需選擇一個 Caster 絕對變化量下限或上限。")
+        return ("min", minimum) if minimum is not None else ("max", maximum)
 
     def validate(self, project):
-        if any(type(value) not in (int, float) or not math.isfinite(value) for value in vars(self).values()):
+        _, front_limit = self.criterion("front")
+        _, rear_limit = self.criterion("rear")
+        values = (self.heave_mm, front_limit, rear_limit)
+        if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
             raise ValueError("SVSA 搜尋的三個設定都必須是有限數值。")
-        if min(self.front_min_change_deg, self.rear_max_change_deg) < 0:
+        if min(front_limit, rear_limit) < 0:
             raise ValueError("Caster 絕對變化量的下限／上限不得為負。")
         check_pose_travel((self.heave_mm, self.heave_mm), travel_limits(project))
         return self
@@ -98,8 +126,17 @@ def _caster_change(project, axle, length, heave_mm):
     return CasterChange(length, *values)
 
 
+def _meets_bound(change_deg, bound, limit_deg):
+    if not math.isfinite(change_deg):
+        return False
+    if bound == "min":
+        return change_deg + ANGLE_TOLERANCE_DEG >= limit_deg
+    return change_deg <= limit_deg + ANGLE_TOLERANCE_DEG
+
+
 def _search_axle(project, axle, settings, cancelled, progress):
     lengths = svsa_candidates(axle)
+    bound, limit_deg = settings.criterion(axle)
     best, rejected, last_error = None, 0, ""
     for tested, length in enumerate(lengths, 1):
         if cancelled():
@@ -112,31 +149,30 @@ def _search_axle(project, axle, settings, cancelled, progress):
             progress(axle, tested, len(lengths), length, None, last_error)
             if cancelled():
                 raise SearchCancelled()
-            if axle == "front":
+            if bound == "min":
                 return AxleSVSAResult(best, tested, len(lengths), "geometry", length,
                                       geometry_rejected=rejected, error=last_error)
             continue
-        passed = (change.absolute_deg+ANGLE_TOLERANCE_DEG >= settings.front_min_change_deg if axle == "front"
-                  else change.absolute_deg <= settings.rear_max_change_deg+ANGLE_TOLERANCE_DEG)
+        passed = _meets_bound(change.absolute_deg, bound, limit_deg)
         progress(axle, tested, len(lengths), length, change, "合格" if passed else "Caster 變化量未達條件")
         if cancelled():
             raise SearchCancelled()
-        if axle == "front":
+        if bound == "min":
             if not passed:
                 return AxleSVSAResult(best, tested, len(lengths), "caster_limit", length, change)
             best = change
         elif passed:
             return AxleSVSAResult(change, tested, len(lengths), "found", geometry_rejected=rejected)
-    return AxleSVSAResult(best, len(lengths), len(lengths), "upper_limit" if axle == "front" else "no_solution",
+    return AxleSVSAResult(best, len(lengths), len(lengths), "upper_limit" if bound == "min" else "no_solution",
                           geometry_rejected=rejected, error=last_error)
 
 
 def search_svsa(project, settings, *, cancelled=lambda: False, progress=lambda *args: None):
     """Select both lengths, verify the combined pose, then return one snapshot.
 
-    Front stops at the first failed candidate; rear may skip invalid shorter
-    geometries to find its first valid candidate within the angle ceiling.
-    Source inputs, Anti, initial caster and stroke limits are never mutated.
+    A minimum change keeps the last qualifying length before the first
+    failure. A maximum change finds the first qualifying length, skipping
+    invalid candidates. The selection runs independently for each axle.
     """
     project = validate(project)
     if enabled(project):
@@ -159,9 +195,8 @@ def search_svsa(project, settings, *, cancelled=lambda: False, progress=lambda *
         target = engine.solve_sv(settings.heave_mm, settings.heave_mm)["metrics"]
         changes = {axle: CasterChange(candidate[axle]["svsa"], zero[f"caster_{axle}_deg"],
                                      target[f"caster_{axle}_deg"]) for axle in ("front", "rear")}
-        if (not all(math.isfinite(change.absolute_deg) for change in changes.values())
-                or changes["front"].absolute_deg+ANGLE_TOLERANCE_DEG < settings.front_min_change_deg
-                or changes["rear"].absolute_deg > settings.rear_max_change_deg+ANGLE_TOLERANCE_DEG):
+        if not all(_meets_bound(change.absolute_deg, *settings.criterion(axle))
+                   for axle, change in changes.items()):
             raise ValueError("組合姿態的 Caster 變化量未達設定條件。")
     except (ValueError, ArithmeticError) as exc:
         return SVSASearchResult(None, front, rear, f"前後軸組合驗證失敗：{exc}")

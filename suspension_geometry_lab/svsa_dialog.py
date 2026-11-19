@@ -1,11 +1,17 @@
-"""Three-input SVSA setup and cancellable, transactional search progress."""
+"""SVSA setup and cancellable, transactional search progress."""
 import queue
 import threading
 import tkinter as tk
 from tkinter import ttk
 
 from .roll_center_search import SearchCancelled
-from .svsa_search import SVSASearchSettings, search_svsa
+from .svsa_search import SVSA_MAX_M, SVSA_STEP_M, SVSASearchSettings, search_svsa, svsa_candidates
+
+
+AXLE_LABELS = {"front": "前軸", "rear": "後軸"}
+BOUND_SYMBOLS = {"min": "≥", "max": "≤"}
+CANDIDATE_RANGE = (f"前軸從 {svsa_candidates('front')[0]:g} m、後軸從 {svsa_candidates('rear')[0]:g} m 起，"
+                   f"以 {SVSA_STEP_M:g} m 級距搜尋至 {SVSA_MAX_M:g} m。")
 
 
 def _show_modal(dialog, app):
@@ -31,22 +37,33 @@ class SVSASettingsDialog(tk.Toplevel):
         body = ttk.Frame(self, padding=18)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="前後輪 SVSA 最佳化", font=("Microsoft JhengHei UI", 11, "bold")).pack(anchor="w")
-        self.inputs, self.entries = {}, {}
-        for key, label in (("heave_mm", "目標 Heave（mm，正值上壓）"),
-                           ("front_min_change_deg", "前輪 |ΔCaster| 下限（deg）"),
-                           ("rear_max_change_deg", "後輪 |ΔCaster| 上限（deg）")):
-            row = ttk.Frame(body)
+        self.inputs, self.entries, self.bounds = {}, {}, {}
+        row = ttk.Frame(body)
+        row.pack(fill="x", pady=(12, 0))
+        ttk.Label(row, text="目標 Heave（mm，正值上壓）").pack(side="left")
+        self.inputs["heave_mm"] = tk.StringVar(self, value=f"{defaults.heave_mm:g}")
+        self.entries["heave_mm"] = ttk.Entry(row, textvariable=self.inputs["heave_mm"], width=14)
+        self.entries["heave_mm"].pack(side="right", padx=(18, 0))
+        for axle, label in AXLE_LABELS.items():
+            bound, threshold = defaults.criterion(axle)
+            row = ttk.LabelFrame(body, text=f"{label} Caster 絕對變化量", padding=(10, 7))
             row.pack(fill="x", pady=(12, 0))
-            ttk.Label(row, text=label).pack(side="left")
-            self.inputs[key] = tk.StringVar(value=f"{getattr(defaults, key):g}")
+            self.bounds[axle] = tk.StringVar(self, value=bound)
+            for value, choice in (("min", "下限（≥）"), ("max", "上限（≤）")):
+                ttk.Radiobutton(row, text=choice, variable=self.bounds[axle], value=value).pack(
+                    side="left", padx=(0, 12))
+            key = f"{axle}_limit_deg"
+            self.inputs[key] = tk.StringVar(self, value=f"{threshold:g}")
             self.entries[key] = ttk.Entry(row, textvariable=self.inputs[key], width=14)
-            self.entries[key].pack(side="right", padx=(18, 0))
+            self.entries[key].pack(side="right")
+            ttk.Label(row, text="門檻（°）").pack(side="right", padx=(12, 6))
         analysis = project["analysis"]
         ttk.Label(body, text=(f"Heave 沿用目前行程：−{analysis['droop_mm']:g}～+{analysis['bump_mm']:g} mm。\n"
-                  "比較零行程與前後輪同量 Heave 的 Caster 絕對變化量（Pitch＝0）。\n"
-                  "前輪：1～15 m，每次 +0.5 m，取首次不達下限前的最長值。\n"
-                  "後輪：0.5～15 m，每次 +0.5 m，取第一個不超過上限的最短值。\n"
-                  "0 m 無法建立有效 SVSA；前後皆合格才同時套用左側參數與兩軸結果。"),
+                  "比較零行程與目標 Heave 的 Caster 絕對變化量（Pitch＝0）。\n"
+                  f"{CANDIDATE_RANGE}\n"
+                  "選下限時，在第一個不合格或無解的候選之前取最長值。\n"
+                  "選上限時，取第一個合格的最短值，可略過不合格或無解的候選。\n"
+                  "兩軸皆合格且組合姿態通過驗證後，才一併套用結果及左側參數。"),
                   wraplength=540, foreground="#64748b").pack(fill="x", pady=(14, 4))
         self.error = ttk.Label(body, text="", foreground="#b45309", wraplength=540)
         self.error.pack(fill="x", pady=(4, 12))
@@ -63,7 +80,10 @@ class SVSASettingsDialog(tk.Toplevel):
             self.error.configure(text="三個欄位都需要數值，請確認沒有空白或文字。")
             return
         try:
-            settings = SVSASearchSettings(**values)
+            settings = SVSASearchSettings.from_bounds(
+                values["heave_mm"], self.bounds["front"].get(), values["front_limit_deg"],
+                self.bounds["rear"].get(), values["rear_limit_deg"],
+            )
             settings.validate(self.project)
         except (ValueError, ArithmeticError) as exc:
             self.error.configure(text=f"請檢查輸入：{exc}")
@@ -76,6 +96,7 @@ class SVSASettingsDialog(tk.Toplevel):
         # Finalize Tk variables on the UI thread, not on a solver's GC pass.
         self.inputs.clear()
         self.entries.clear()
+        self.bounds.clear()
         self.error = None
 
 
@@ -95,16 +116,15 @@ class SVSASearchDialog(tk.Toplevel):
         self.bind("<Escape>", lambda event: self.destroy())
         body = ttk.Frame(self, padding=18)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text="尋找前輪最長與後輪最短的合格 SVSA",
+        ttk.Label(body, text="尋找符合 Caster 變化條件的 SVSA",
                   font=("Microsoft JhengHei UI", 11, "bold")).pack(anchor="w")
-        ttk.Label(body, text=(f"Heave {settings.heave_mm:+g} mm，Pitch＝0\n"
-                              f"前輪 |ΔCaster| ≥ {settings.front_min_change_deg:g}°；"
-                              f"後輪 |ΔCaster| ≤ {settings.rear_max_change_deg:g}°\n"
-                              "前輪由 1 m、後輪由 0.5 m 起，以 0.5 m 級距搜尋至 15 m。"),
+        criteria = "\n".join(f"{label} |ΔCaster| {self._criterion(axle)}"
+                              for axle, label in AXLE_LABELS.items())
+        ttk.Label(body, text=(f"Heave {settings.heave_mm:+g} mm，Pitch＝0\n{criteria}\n{CANDIDATE_RANGE}"),
                   wraplength=560).pack(fill="x", pady=(12, 8))
         self.progress = ttk.Progressbar(body, length=560, maximum=100)
         self.progress.pack(fill="x")
-        self.status = tk.StringVar(value="正在建立前輪 1 m 的候選幾何…")
+        self.status = tk.StringVar(value=f"正在檢查前軸 SVSA {svsa_candidates('front')[0]:g} m…")
         ttk.Label(body, textvariable=self.status, wraplength=560).pack(fill="x", pady=12)
         ttk.Label(body, text="使用 SV 平面固定切線模型，只比較零行程與目標 Heave 兩個姿態；沿用左側的 Anti 與初始 Caster。",
                   wraplength=560, foreground="#64748b").pack(fill="x")
@@ -136,9 +156,10 @@ class SVSASearchDialog(tk.Toplevel):
                 if kind == "progress":
                     axle, tested, total, length, change, reason = value
                     self.progress.configure(value=(50 if axle == "rear" else 0)+tested/total*50)
-                    angle = f"|ΔCaster| {change.absolute_deg:.6f}°" if change is not None else reason
-                    self.status.set(f"{'前' if axle == 'front' else '後'}輪 SVSA {length:g} m；"
-                                    f"已檢查 {tested}/{total} 個長度\n{angle} · {reason}")
+                    angle = (f"|ΔCaster| {change.absolute_deg:.6f}°，條件 {self._criterion(axle)} · {reason}"
+                             if change is not None else reason)
+                    self.status.set(f"{AXLE_LABELS[axle]} SVSA {length:g} m，"
+                                    f"已檢查 {tested}/{total} 個長度\n{angle}")
                 elif kind == "error":
                     self.status.set(f"搜尋失敗：{value}\n原設計未變更。")
                     finished = True
@@ -153,26 +174,32 @@ class SVSASearchDialog(tk.Toplevel):
         else:
             self.poll_timer = self.after(40, self.poll)
 
+    def _criterion(self, axle):
+        bound, threshold = self.settings.criterion(axle)
+        return f"{BOUND_SYMBOLS[bound]} {threshold:g}°"
+
     def _summary(self, axle, result):
-        title = "前輪" if axle == "front" else "後輪"
+        title = AXLE_LABELS[axle]
+        criterion = self._criterion(axle)
         if result.best is None:
-            text = f"{title}：沒有找到合格 SVSA（已檢查 {result.tested} 個長度）。"
+            text = (f"{title}尋找 |ΔCaster| {criterion} 的 SVSA，"
+                    f"已檢查 {result.tested} 個長度，沒有合格結果。")
         else:
             change = result.best
-            criterion = (f"≥ {self.settings.front_min_change_deg:g}°" if axle == "front" else
-                         f"≤ {self.settings.rear_max_change_deg:g}°")
             text = (f"{title}最佳 SVSA：{change.svsa_m:g} m\n"
-                    f"Caster {change.zero_deg:+.6f}° → {change.target_deg:+.6f}°；"
+                    f"Caster {change.zero_deg:+.6f}° → {change.target_deg:+.6f}°，"
                     f"Δ {change.signed_deg:+.6f}°，|Δ| {change.absolute_deg:.6f}° {criterion}")
         if result.stop_reason == "caster_limit":
-            text += (f"\n下一級 {result.stopped_svsa_m:g} m 的 |ΔCaster| "
-                     f"{result.stopped_change.absolute_deg:.6f}° 未達前輪下限，停止搜尋。")
+            label = "下一級" if result.best is not None else "起始候選"
+            text += (f"\n{label} {result.stopped_svsa_m:g} m 的 |ΔCaster| "
+                     f"{result.stopped_change.absolute_deg:.6f}° 未達{title}下限，停止搜尋。")
         elif result.stop_reason == "geometry":
             text += f"\n在 {result.stopped_svsa_m:g} m 因幾何／姿態無解停止：{result.error}"
         elif result.stop_reason == "upper_limit":
-            text += "\n已達 15 m 上限，採範圍內最長值。"
+            text += f"\n已達 {SVSA_MAX_M:g} m，採範圍內最長值。"
         elif result.stop_reason == "found":
-            text += f"\n從 0.5 m 起首次合格，為最短值；已檢查 {result.tested} 個長度。"
+            text += (f"\n從 {svsa_candidates(axle)[0]:g} m 起首次合格，"
+                     f"為最短值。已檢查 {result.tested} 個長度。")
         elif result.error:
             text += f"\n最近的幾何失敗原因：{result.error}"
         return text

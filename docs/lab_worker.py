@@ -126,6 +126,7 @@ ACTION_ERRORS = {
     "賽道姿態產生無效的 Camber。": "The lap pose produced an invalid camber angle.",
     "最大允許 Camber 須為 0～90 度的有限數值。": "Maximum camber must be a finite angle from 0 to 90 degrees.",
     "SVSA 搜尋的三個設定都必須是有限數值。": "All SVSA search settings must be finite numbers.",
+    "前後軸各需選擇一個 Caster 絕對變化量下限或上限。": "Choose one lower or upper caster change limit per axle.",
     "Caster 絕對變化量的下限／上限不得為負。": "Caster change limits must be zero or positive.",
     "目標姿態的 Caster 無有效數值。": "Caster is undefined at the target pose.",
     "前後軸必須都找到合格值，才會一起套用。": "Both axles need a candidate that meets the caster change limits.",
@@ -523,9 +524,17 @@ def search(payload):
         elif result.stop_reason == "upper_limit":
             status += " The search reached the upper design limit."
     elif kind == "svsa":
-        options = SVSASearchSettings(settings.get("heave_mm", 7.), settings.get("front_min_deg", .15),
-                                    settings.get("rear_max_deg", .1))
+        options = SVSASearchSettings.from_bounds(
+            settings.get("heave_mm", 7.),
+            settings.get("front_bound", "min"), settings.get("front_limit_deg", settings.get("front_min_deg", .15)),
+            settings.get("rear_bound", "max"), settings.get("rear_limit_deg", settings.get("rear_max_deg", .1)),
+        )
         result = search_svsa(project, options, progress=progress)
+        front_bound, front_limit = options.criterion("front")
+        rear_bound, rear_limit = options.criterion("rear")
+        signs = {"min": "≥", "max": "≤"}
+        limits = (f"Front |ΔCaster| {signs[front_bound]} {front_limit:g}°. "
+                  f"Rear |ΔCaster| {signs[rear_bound]} {rear_limit:g}°.")
         if result.project:
             target_view = {"page": "sv", "mode": "pose", "values": [options.heave_mm, 0.]}
             front, rear = result.front.best, result.rear.best
@@ -535,6 +544,7 @@ def search(payload):
                       f"change {rear.signed_deg:+.6f}°). Checked {result.front.tested} front and {result.rear.tested} rear lengths.")
         elif result.error:
             status = english_error(result.error)
+        status = f"{status} {limits}"
     elif kind == "caster":
         if _lap is None:
             raise ValueError("Import LapSim CSV with body pose and both front-wheel steering angles before optimizing caster.")

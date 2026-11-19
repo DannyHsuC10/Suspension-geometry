@@ -48,6 +48,23 @@ class SVSASearchTests(unittest.TestCase):
         self.assertEqual(result.project["analysis"], before["analysis"])
         self.assertEqual(result.project["vehicle"], before["vehicle"])
 
+    def test_each_axle_selects_its_own_bound_at_real_zero_pitch_heave(self):
+        project = default_project()
+        before = copy.deepcopy(project)
+        cases = {
+            ("min", "min"): (2.5, 4.),
+            ("max", "min"): (3., 4.),
+            ("max", "max"): (3., 4.5),
+        }
+        for (front_bound, rear_bound), (front_length, rear_length) in cases.items():
+            with self.subTest(front=front_bound, rear=rear_bound):
+                settings = SVSASearchSettings.from_bounds(7., front_bound, .15, rear_bound, .1)
+                result = search_svsa(project, settings)
+                self.assertIsNotNone(result.project, result.error)
+                self.assertEqual(result.project["front"]["svsa"], front_length)
+                self.assertEqual(result.project["rear"]["svsa"], rear_length)
+        self.assertEqual(project, before)
+
     def test_independent_evaluation_matches_full_solver_for_positive_and_negative_heave(self):
         project = default_project()
         for axle, length in (("front", 1.), ("front", 2.5), ("rear", .5), ("rear", 4.5)):
@@ -84,6 +101,25 @@ class SVSASearchTests(unittest.TestCase):
         self.assertEqual(rear.best.svsa_m, 1.5)
         self.assertEqual(rear.geometry_rejected, 1)
 
+    def test_swapped_strategies_follow_the_bound_and_accept_equality(self):
+        settings = SVSASearchSettings.from_bounds(7., "max", .15, "min", .1)
+        with patch("suspension_geometry_lab.svsa_search._caster_change",
+                   side_effect=[Unreachable("無解"), CasterChange(1.5, 0., -.2),
+                                CasterChange(2., 0., -.15)]) as evaluate:
+            front = _search_axle(default_project(), "front", settings, lambda: False, lambda *args: None)
+        self.assertEqual(evaluate.call_count, 3)
+        self.assertEqual(front.stop_reason, "found")
+        self.assertEqual(front.best.svsa_m, 2.)
+        self.assertEqual(front.geometry_rejected, 1)
+        with patch("suspension_geometry_lab.svsa_search._caster_change",
+                   side_effect=[CasterChange(.5, 0., -.1), CasterChange(1., 0., -.09),
+                                CasterChange(1.5, 0., -.2)]) as evaluate:
+            rear = _search_axle(default_project(), "rear", settings, lambda: False, lambda *args: None)
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertEqual(rear.stop_reason, "caster_limit")
+        self.assertEqual(rear.best.svsa_m, .5)
+        self.assertEqual(rear.stopped_svsa_m, 1.)
+
     def test_zero_change_limits_reach_front_maximum_and_rear_minimum(self):
         result = search_svsa(default_project(), SVSASearchSettings(0., 0., 0.))
         self.assertIsNotNone(result.project)
@@ -104,6 +140,36 @@ class SVSASearchTests(unittest.TestCase):
         rejected = search_svsa(project, SVSASearchSettings())
         self.assertIsNone(rejected.project)
         self.assertIn("A 臂", rejected.front.error)
+
+    def test_combined_pose_rechecks_swapped_bound_before_returning_project(self):
+        project = default_project()
+        before = copy.deepcopy(project)
+        settings = SVSASearchSettings.from_bounds(7., "max", .15, "min", .1)
+
+        def optimistic_front(candidate, axle, length, heave):
+            if axle == "front":
+                return CasterChange(length, 0., .15)
+            return _caster_change(candidate, axle, length, heave)
+
+        with patch("suspension_geometry_lab.svsa_search._caster_change", side_effect=optimistic_front):
+            result = search_svsa(project, settings)
+        self.assertIsNone(result.project)
+        self.assertIn("組合驗證失敗", result.error)
+        self.assertEqual(project, before)
+
+    def test_each_axle_requires_exactly_one_finite_nonnegative_limit(self):
+        for settings in (
+            SVSASearchSettings(front_min_change_deg=None),
+            SVSASearchSettings(rear_max_change_deg=None),
+            SVSASearchSettings(front_max_change_deg=.15),
+            SVSASearchSettings(rear_min_change_deg=.1),
+            SVSASearchSettings.from_bounds(7., "max", float("inf"), "min", .1),
+            SVSASearchSettings.from_bounds(7., "max", .15, "min", -.1),
+        ):
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                settings.validate(default_project())
+        with self.assertRaises(ValueError):
+            SVSASearchSettings.from_bounds(7., "both", .15, "min", .1)
 
     def test_invalid_settings_cancellation_and_hardpoints_preserve_source(self):
         project = default_project()
@@ -174,7 +240,9 @@ class SVSASearchGuiTests(unittest.TestCase):
 
         def choose(dialog):
             self.assertEqual({key: var.get() for key, var in dialog.inputs.items()},
-                             {"heave_mm": "7", "front_min_change_deg": "0.15", "rear_max_change_deg": "0.1"})
+                             {"heave_mm": "7", "front_limit_deg": "0.15", "rear_limit_deg": "0.1"})
+            self.assertEqual({axle: var.get() for axle, var in dialog.bounds.items()},
+                             {"front": "min", "rear": "max"})
             dialog.inputs["heave_mm"].set("8")
             dialog.accept()
 
@@ -186,6 +254,32 @@ class SVSASearchGuiTests(unittest.TestCase):
         self.assertEqual(settings, SVSASearchSettings(8., .15, .1))
         self.assertEqual(project["front"]["anti"], .25)
         self.panel.svsa_search_dialog = None
+
+    def test_real_search_applies_swapped_bounds_and_reopens_with_same_choices(self):
+        def choose(dialog):
+            dialog.bounds["front"].set("max")
+            dialog.bounds["rear"].set("min")
+            dialog.accept()
+
+        with patch.object(self.app, "wait_window", side_effect=choose):
+            self.panel.find_svsa()
+        dialog = self.panel.svsa_search_dialog
+        self.wait_dialog(dialog)
+        self.wait_panel()
+        self.assertIn("已同時套用", dialog.status.get())
+        self.assertEqual(dialog.settings.criterion("front"), ("max", .15))
+        self.assertEqual(dialog.settings.criterion("rear"), ("min", .1))
+        self.assertEqual(self.app.project["front"]["svsa"], 3.)
+        self.assertEqual(self.app.project["rear"]["svsa"], 4.)
+        dialog.destroy()
+
+        def confirm_previous_choices(dialog):
+            self.assertEqual(dialog.bounds["front"].get(), "max")
+            self.assertEqual(dialog.bounds["rear"].get(), "min")
+            dialog.destroy()
+
+        with patch.object(self.app, "wait_window", side_effect=confirm_previous_choices):
+            self.panel.find_svsa()
 
     def test_settings_validate_without_closing_and_cancel_never_starts_worker(self):
         from suspension_geometry_lab.svsa_dialog import SVSASettingsDialog
