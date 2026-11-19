@@ -204,5 +204,28 @@
         ]
       }
     }
+  },
+  "steering": {
+    "front": {
+      "tie_rod_x": -0.1,
+      "tie_rod_y": 0.5125,
+      "rack_x": -0.13,
+      "rack_z": 0.15,
+      "rack_length": 0.55,
+      "rack_limit_left_mm": 30.0,
+      "rack_limit_right_mm": 30.0,
+      "rack_travel_mm": 0.0
+    },
+    "rear": {
+      "tie_rod_x": -1.43,
+      "tie_rod_y": 0.5084,
+      "rack_x": -1.4,
+      "rack_z": 0.20574,
+      "rack_length": 0.5456,
+      "rack_limit_left_mm": 30.0,
+      "rack_limit_right_mm": 30.0,
+      "rack_travel_mm": 0.0,
+      "enabled": false
+    }
   }
 }
