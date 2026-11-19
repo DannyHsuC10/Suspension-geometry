@@ -102,9 +102,9 @@ textarea { resize: vertical; }
 .project-actions .button-primary { border-color: #277e75; background: var(--accent); }
 .project-actions .button-primary:enabled:hover { background: #095b54; }
 
-.workspace { padding-block: .95rem 2rem; }
-.tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .85rem; }
-.tabs button, .tabs a { padding: .56rem .9rem; white-space: nowrap; }
+.workspace { padding-block: .5rem 2rem; }
+.tabs { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .45rem; }
+.tabs button, .tabs a { padding: .3rem .65rem; font-size: .8125rem; line-height: 1.2; white-space: nowrap; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: .9rem; align-items: start; }
 .sidebar, .main-column { display: grid; align-content: start; gap: .85rem; min-width: 0; }
 .panel {
@@ -138,22 +138,33 @@ progress { max-width: 100%; }
 
 .chart-panel { overflow: hidden; }
 .chart-panel > .panel-header, .chart-panel > .plot-controls, .chart-toolbar, .export-toolbar { padding: .78rem .95rem; }
+.chart-panel > .chart-heading { padding-block: .35rem; align-items: center; gap: .2rem .7rem; flex-wrap: wrap; }
+.chart-heading .section-heading { font-size: 1rem; }
+.view-introduction { flex: 1; min-width: 12rem; text-align: right; font-size: .8125rem; color: var(--muted); }
+.view-introduction[open] { flex-basis: 100%; text-align: left; }
+.view-introduction[open] > summary { margin-bottom: .2rem; }
+.view-introduction p { margin: 0; font-size: .8125rem; line-height: 1.35; }
 .chart-toolbar { justify-content: flex-start; align-items: end; background: var(--night-soft); color: #eaf1fb; }
+.chart-panel > .chart-toolbar { padding-block: .3rem; gap: .25rem .5rem; align-items: center; }
+.chart-toolbar .field { gap: .3rem; }
 .chart-toolbar .field { grid-template-columns: auto minmax(0, 1fr); align-items: center; }
 .chart-toolbar .chart-select { flex: 1 1 15rem; max-width: 27rem; }
 .chart-toolbar #reset-view { margin-left: auto; }
 .chart-toolbar select, .chart-toolbar button { background: #253550; color: #eaf1fb; border-color: #4f6078; }
 .chart-toolbar button:enabled:hover { background: #3a4b65; border-color: #7b91ad; }
 .chart-toolbar button, .chart-toolbar select, .plot-controls button, .plot-controls select { font-size: .82rem; }
-.chart-panel > .plot-controls { gap: .55rem; background: #f3f7fb; }
-.pose-controls { display: grid; gap: .4rem; flex: 0 0 100%; min-width: 0; }
+.chart-toolbar button, .chart-toolbar select, .plot-controls button, .plot-controls select,
+.pose-row input[type=number] { padding-block: .22rem; line-height: 1.2; }
+.chart-panel > .plot-controls { gap: .2rem .7rem; padding-block: .3rem; background: #f3f7fb; }
+.pose-controls { display: grid; gap: .15rem; flex: 0 0 100%; min-width: 0; }
 .pose-row { display: grid; grid-template-columns: 10rem minmax(4rem, 1fr) 6rem; align-items: center; gap: .6rem; }
 .pose-row input { width: 100%; margin: 0; }
-.pose-row input[type=number] { padding-block: .35rem; }
-.pose-row label { line-height: 1.3; }
-.view-options { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem .72rem; min-width: 0; }
+.pose-row input[type=number] { padding-block: .22rem; }
+.pose-row label { line-height: 1.2; font-size: .8125rem; }
+.view-options { display: flex; align-items: center; flex-wrap: wrap; gap: .15rem .55rem; min-width: 0; }
 .pose-controls:empty, .view-options:empty { display: none; }
-.plot-controls .check { margin-block: .15rem; }
+.plot-controls .check { margin-block: 0; font-size: .8125rem; }
+.plot-controls #lap-name { font-size: .8125rem; }
 .export-toolbar { justify-content: flex-end; border-top: 1px solid var(--line); }
 .export-toolbar .field { grid-template-columns: auto minmax(0, 1fr); align-items: center; }
 .chart-host {
@@ -339,7 +350,7 @@ dialog h2 { font-size: 1.2rem; }
   .sidebar { grid-row: 2; }
   .metrics-panel { grid-row: 3; }
   .geometry-notes { grid-row: 4; }
-  .tabs { gap: .35rem; }
+  .tabs { gap: .25rem; }
   .tabs button, .tabs a { flex: 0 0 auto; }
   .chart-host { height: clamp(14rem, 45dvh, 22rem); }
   .panel-header { flex-wrap: wrap; }
@@ -348,7 +359,7 @@ dialog h2 { font-size: 1.2rem; }
 @media (max-width: 420px) {
   .header-inner, .workspace { padding-inline: .75rem; }
   .project-actions { width: 100%; }
-  .tabs button, .tabs a { padding-inline: .7rem; }
+  .tabs button, .tabs a { padding-inline: .55rem; }
   .sidebar .field-grid { gap: .5rem; }
   .chart-panel > .panel-header, .chart-panel > .plot-controls, .chart-toolbar, .export-toolbar { padding-inline: .7rem; }
   .pose-row { grid-template-columns: minmax(6.75rem, .9fr) minmax(3rem, 1fr) 4.6rem; gap: .45rem; }
