@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>SuspensionGeometryLab</title>
+  <rect x="0.5" y="0.5" width="15" height="15" rx="2"
+        fill="#111d31" stroke="#58b2b9" stroke-width="0.25" vector-effect="non-scaling-stroke"/>
+  <path d="M3.9 4.65 10.15 5.65 9.6 10.45 3.9 11.4 M9.88 8h2.87"
+        fill="none" stroke="#58b2b9" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12.75 5.55v4.9" stroke="#58b2b9" stroke-width="1.55" stroke-linecap="round"/>
+  <circle cx="3.9" cy="4.65" r="0.75" fill="#58b2b9"/>
+  <circle cx="3.9" cy="11.4" r="0.75" fill="#58b2b9"/>
+</svg>
