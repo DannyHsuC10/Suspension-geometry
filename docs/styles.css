@@ -372,6 +372,10 @@ dialog h2 { font-size: 1.2rem; }
 }
 
 .main-column { gap: .6375rem; }
+.metrics-panel + .geometry-notes { margin-top: -.1275rem; }
+@media (max-width: 850px) {
+  .metrics-panel + .geometry-notes { margin-top: -.18rem; }
+}
 .chart-panel > .export-toolbar { padding: .585rem .7125rem; gap: .3375rem; }
 .export-toolbar .field { font-size: .645rem; gap: .225rem; }
 .export-toolbar select, .export-toolbar button { padding: .36rem .465rem; border-radius: 4.5px; }
