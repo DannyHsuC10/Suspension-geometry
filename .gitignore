@@ -7,3 +7,6 @@ dist/
 *.spec
 .test-output/
 .test-tmp/
+
+# Local tire parameter files (all subdirectories, any extension case).
+*.[tT][iI][rR]
